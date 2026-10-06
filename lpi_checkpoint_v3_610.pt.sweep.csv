@@ -1,0 +1,4 @@
+epoch,ks_p,ks,cyclo_ratio,adv_acc,adv,ber_pct,ber,all_pass,elapsed_s
+608,0.0816,PASS,4.0,55.3,PASS,2.64,FAIL,FAIL,115
+609,0.1082,PASS,4.0,53.2,PASS,2.65,FAIL,FAIL,113
+610,0.6729,PASS,2.5,59.9,FAIL,2.69,FAIL,FAIL,113

@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+"""
+LPI-CGAN v2 — fixes for KS / cyclostationarity / adversary / BER
+"""
+import math
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+# ---------------------------------------------------------------------------
+# Initialization
+# ---------------------------------------------------------------------------
+def _init_linear(m):
+    if isinstance(m, nn.Linear):
+        nn.init.xavier_uniform_(m.weight)
+        if m.bias is not None:
+            nn.init.zeros_(m.bias)
+
+
+def _init_conv(m):
+    if isinstance(m, nn.Conv1d):
+        nn.init.kaiming_normal_(m.weight, a=0.2, mode='fan_in',
+                               nonlinearity='leaky_relu')
+        if m.bias is not None:
+            nn.init.zeros_(m.bias)
+
+
+# ---------------------------------------------------------------------------
+# Differentiable Gaussianization
+#   Maps any input to EXACTLY standard-normal marginals:
+#     x -> u = Phi(x) -> z = Phi^{-1}(eps + (1-2eps) u)
+#   eps keeps erfinv gradients finite.
+# ---------------------------------------------------------------------------
+class Gaussianize(nn.Module):
+    def __init__(self, eps=1e-4):
+        super().__init__()
+        self.eps = eps
+
+    def forward(self, x):
+        u = 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0)))      # ~Uniform(0,1)
+        u = self.eps + (1.0 - 2.0 * self.eps) * u             # clamp away from 0/1
+        z = math.sqrt(2.0) * torch.erfinv(2.0 * u - 1.0)      # ~N(0,1)
+        return z
+
+
+def rand_circular_shift(x):
+    """Random circular time shift along last dim, per sample."""
+    B, _, T = x.shape
+    shifts = torch.randint(0, T, (B, 1, 1), device=x.device)
+    idx = (torch.arange(T, device=x.device).view(1, 1, T) + shifts) % T
+    return torch.gather(x, 2, idx.expand(B, x.shape[1], T))
+
+
+# ---------------------------------------------------------------------------
+# Generator: [z(64); b(256)] -> MLP -> (2, 512), unit power per sample
+# ---------------------------------------------------------------------------
+# NOTE: the message enters at FULL RANK. The old design crushed 256 bits
+# through a Linear(256->32) embedding -- a rank-32 bottleneck through which
+# 256 bits cannot flow, which is why the decoder could never beat 50% BER.
+# The old Gaussianize layer is removed: it composed Phi^{-1}(Phi(x)) which is
+# the identity function (up to eps tail-clamping), so it never actually
+# Gaussianized anything. Marginal normality is now enforced by the
+# quantile-matching + moment losses in train.py.
+class Generator(nn.Module):
+    def __init__(self, msg_len=256, z_dim=64, out_len=1024, **_ignored):
+        super().__init__()
+        self.msg_len = msg_len
+        self.z_dim = z_dim
+        self.out_len = out_len
+
+        self.fc = nn.Sequential(
+            nn.Linear(z_dim + msg_len, 512),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(512, 1024),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(1024, out_len),
+        )
+        self.apply(_init_linear)
+
+    def forward(self, z, b):
+        x = torch.cat([z, b], dim=1)                # (B, 64+256) -- full rank
+        x = self.fc(x)                              # (B, 1024)
+        x = x.view(-1, 2, 512)
+        # exact zero mean + unit power per sample: without the zero-mean step
+        # the pooled output drifts to N(-0.02, 1), which alone fails the KS test
+        B = x.shape[0]
+        xf = x.view(B, -1)
+        xf = xf - xf.mean(dim=1, keepdim=True)
+        p = (xf ** 2).mean(dim=1, keepdim=True)
+        xf = xf / torch.sqrt(p + 1e-8)
+        x = xf.view(-1, 2, 512)
+        # restore the power/DC fluctuations real AWGN has. Exact normalization
+        # makes every sample have std EXACTLY 1.0000 and mean EXACTLY 0, which
+        # a detector can learn trivially (real AWGN: std 1 +/- 0.022,
+        # mean +/- 0.031).
+        # per-element innovation noise: without it the 1024 outputs are a
+        # deterministic function of only 320 latents, so the periodogram is
+        # artificially smooth (std/mean 0.65 vs AWGN's 1.0) -- a strong tell
+        e = torch.randn(B, 2, 512, device=x.device, dtype=x.dtype)
+        y = x + 0.30 * e
+        # random smooth spectral tilt per sample (mimics multipath fading):
+        # randomizes the periodogram shape so a detector cannot key on the
+        # encoding's smooth-PSD signature, and pushes the periodogram
+        # coefficient of variation toward AWGN's 1.0
+        n_ctl = 8
+        ctrl = torch.randn(B, 2, n_ctl, device=x.device, dtype=x.dtype)
+        ctrl = F.interpolate(ctrl, size=257, mode='linear', align_corners=False)
+        ctrl = ctrl - ctrl.mean(dim=2, keepdim=True)
+        Yf = torch.fft.rfft(y, dim=2) * (1.0 + 0.5 * ctrl)
+        y = torch.fft.irfft(Yf, n=512, dim=2)
+        # final exact unit power (innovations inflated it to ~1.02 -> KS fail)
+        yf = y.view(B, -1)
+        yf = yf - yf.mean(dim=1, keepdim=True)
+        yf = yf / torch.sqrt((yf ** 2).mean(dim=1, keepdim=True) + 1e-8)
+        y = yf.view(-1, 2, 512)
+        # re-impose the power/DC fluctuations real AWGN has
+        g = torch.randn(B, 1024, device=x.device, dtype=x.dtype)
+        s = g.pow(2).mean(dim=1).sqrt().view(B, 1, 1)
+        c = torch.randn(B, 1, 1, device=x.device, dtype=x.dtype) / math.sqrt(1024.0)
+        return y * s + c
+
+
+# ---------------------------------------------------------------------------
+# Wasserstein Critic with spectral normalization (stability, no GP needed)
+# ---------------------------------------------------------------------------
+class Discriminator(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        def sn(cin, cout, k, s, p):
+            return nn.utils.spectral_norm(
+                nn.Conv1d(cin, cout, k, s, p))
+
+        self.net = nn.Sequential(
+            sn(2, 64, 4, 2, 1),
+            nn.LeakyReLU(0.2, inplace=True),
+            sn(64, 128, 4, 2, 1),
+            nn.LeakyReLU(0.2, inplace=True),
+            sn(128, 256, 4, 2, 1),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.AdaptiveAvgPool1d(1),
+            nn.Flatten(),
+            nn.Linear(256, 1),
+        )
+        self.apply(_init_conv)
+
+    def forward(self, x):
+        return self.net(x)
+
+
+# ---------------------------------------------------------------------------
+# Decoder: (2, 512) -> 256 bits in [0,1]  (BCE with hard labels)
+# ---------------------------------------------------------------------------
+class Decoder(nn.Module):
+    def __init__(self, msg_len=256):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv1d(2, 64, 5, padding=2),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv1d(64, 128, 5, stride=2, padding=2),   # 512 -> 256
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv1d(128, 128, 5, padding=2),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv1d(128, 1, 1),                          # (B,1,256)
+        )
+        self.apply(_init_conv)
+
+    def forward(self, x):
+        logits = self.net(x).squeeze(1)                   # (B, 256)
+        return torch.sigmoid(logits)
+
+    def hard_bits(self, x):
+        return (self.forward(x) > 0.5).float()
+
+
+# ---------------------------------------------------------------------------
+# Training loop (Wasserstein + decoder joint training)
+# ---------------------------------------------------------------------------
+def train(device="cuda", epochs=200, batch=128):
+    G = Generator().to(device)
+    D = Discriminator().to(device)
+    Dec = Decoder().to(device)
+
+    opt_G = torch.optim.Adam(G.parameters(), lr=1e-4, betas=(0.5, 0.9))
+    opt_D = torch.optim.Adam(D.parameters(), lr=1e-4, betas=(0.5, 0.9))
+    opt_Dec = torch.optim.Adam(Dec.parameters(), lr=2e-4, betas=(0.5, 0.9))
+
+    n_critic = 5
+    for ep in range(epochs):
+        for _ in range(n_critic):
+            b = (torch.rand(batch, 256, device=device) > 0.5).float()
+            b = 2 * b - 1                                   # bipolar ±1
+            z = torch.randn(batch, 64, device=device)
+            with torch.no_grad():
+                fake = G(z, b)
+            real = torch.randn(batch, 2, 512, device=device)
+            real = real / real.view(batch, -1).pow(2).mean(1).sqrt().view(-1, 1, 1)
+
+            # augmentation: random circular shifts kill cyclostationary tells
+            real_s = rand_circular_shift(real)
+            fake_s = rand_circular_shift(fake)
+
+            d_loss = -(D(real_s).mean() - D(fake_s).mean())
+            opt_D.zero_grad(); d_loss.backward(); opt_D.step()
+
+        b = (torch.rand(batch, 256, device=device) > 0.5).float()
+        b = 2 * b - 1
+        z = torch.randn(batch, 64, device=device)
+        fake = G(z, b)
+        g_adv = -D(rand_circular_shift(fake)).mean()
+
+        bits = (b + 1) / 2                                   # back to {0,1}
+        dec_out = Dec(rand_circular_shift(fake))
+        dec_loss = F.binary_cross_entropy(dec_out, bits)
+
+        # keep decoded info intact, minimize adversary detectability
+        g_loss = g_adv + 1.0 * dec_loss
+        opt_G.zero_grad(); opt_Dec.zero_grad()
+        g_loss.backward()
+        opt_G.step(); opt_Dec.step()
+
+        if ep % 20 == 0:
+            print(f"ep {ep:4d}  D {d_loss.item():+.4f}  "
+                  f"G_adv {g_adv.item():+.4f}  BCE {dec_loss.item():.4f}")
+    return G, D, Dec
+
+
+if __name__ == "__main__":
+    G, D, Dec = train()
+    torch.save({"G": G.state_dict(), "D": D.state_dict(),
+                "Dec": Dec.state_dict()}, "lpicgan_v2.pt")

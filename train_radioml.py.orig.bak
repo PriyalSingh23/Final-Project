@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""
+LPI-CGAN Training with RadioML 2018.01A Dataset
+Uses mixed AWGN + real-world modulated signals for stronger discriminator.
+"""
+import os, numpy as np, torch, torch.nn as nn, torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
+from models import Generator, Discriminator, Decoder
+from dataset_radioml import create_mixed_dataset
+
+DEVICE       = 'cuda' if torch.cuda.is_available() else 'cpu'
+BATCH_SIZE   = 64
+EPOCHS       = 200
+LR_G         = 1e-4
+LR_D         = 1e-4
+N_CRITIC     = 5
+CLIP         = 0.01
+D2_RESET_EVERY = 25
+FRAME_LEN    = 512
+MSG_LEN      = 256
+Z_DIM        = 64
+
+W_D2         = 0.5
+W_REC        = 10.0
+W_MEAN       = 1.0
+W_VAR        = 1.0
+W_KURT       = 0.5
+W_SPEC       = 2.0
+W_CYCLO      = 1.0
+W_XCORR      = 1.0
+W_DIV        = 0.1
+
+CHECKPOINT   = 'lpi_checkpoint.pt'
+RADIOML_PATH = 'RML2018.01A.pkl'
+USE_RADIOML  = True
+
+# Loss functions (same as train.py)
+def loss_mean(x): return x.mean() ** 2
+def loss_var(x):
+    B = x.shape[0]
+    var = x.view(B, -1).var(dim=1, unbiased=False).mean()
+    return (var - 1.0) ** 2
+def loss_kurtosis(x):
+    x = x.view(-1)
+    mu = x.mean()
+    sig2 = x.var(unbiased=False)
+    kurt = ((x - mu) ** 4).mean() / (sig2 ** 2 + 1e-8)
+    return (kurt - 3.0) ** 2
+def loss_spectral(gen, ref):
+    gen_psd = torch.abs(torch.fft.rfft(gen, dim=2)) ** 2
+    ref_psd = torch.abs(torch.fft.rfft(ref, dim=2)) ** 2
+    gen_psd = gen_psd / (gen_psd.sum(dim=2, keepdim=True) + 1e-8)
+    ref_psd = ref_psd / (ref_psd.sum(dim=2, keepdim=True) + 1e-8)
+    return F.mse_loss(gen_psd, ref_psd)
+def loss_cyclo(x, max_lag=20):
+    B, C, L = x.shape
+    total = 0.0
+    for lag in range(1, max_lag + 1):
+        corr = (x[:, :, :-lag] * x[:, :, lag:]).mean(dim=2)
+        total += (corr ** 2).mean()
+    return total / max_lag
+def loss_iq_xcorr(x):
+    I = x[:, 0, :] - x[:, 0, :].mean(dim=1, keepdim=True)
+    Q = x[:, 1, :] - x[:, 1, :].mean(dim=1, keepdim=True)
+    return (I * Q).mean(dim=1).pow(2).mean()
+def loss_diversity(x):
+    B = x.shape[0]
+    if B < 2: return torch.tensor(0.0, device=x.device)
+    x_flat = x.view(B, -1)
+    dist = torch.cdist(x_flat, x_flat, p=2)
+    mask = ~torch.eye(B, dtype=torch.bool, device=x.device)
+    return -dist[mask].mean()
+
+class LPIDataset(Dataset):
+    def __init__(self, n=50000, use_radioml=True):
+        self.n = n
+        if use_radioml and os.path.exists(RADIOML_PATH):
+            print("Loading mixed AWGN + RadioML dataset...")
+            self.real_bank = create_mixed_dataset(RADIOML_PATH, n_awgn=n//2, target_len=FRAME_LEN)
+        else:
+            print("Using pure AWGN dataset.")
+            self.real_bank = np.random.randn(n, 2, FRAME_LEN).astype(np.float32)
+        self.messages = [torch.randint(0, 2, (MSG_LEN,)).float() * 2.0 - 1.0 for _ in range(n)]
+    def __len__(self): return self.n
+    def __getitem__(self, idx):
+        b = self.messages[idx]
+        real_idx = np.random.randint(0, len(self.real_bank))
+        real = torch.from_numpy(self.real_bank[real_idx].copy())
+        return b, real
+
+def main():
+    print(f"[TRAIN] Device: {DEVICE} | RadioML: {'ON' if USE_RADIOML else 'OFF'}")
+    G = Generator(msg_len=MSG_LEN, emb_dim=32, z_dim=Z_DIM, out_len=FRAME_LEN*2).to(DEVICE)
+    Dec = Decoder(msg_len=MSG_LEN).to(DEVICE)
+    D1 = Discriminator().to(DEVICE)
+    D2 = Discriminator().to(DEVICE)
+    g_opt = torch.optim.Adam(list(G.parameters()) + list(Dec.parameters()), lr=LR_G, betas=(0.5, 0.9))
+    d1_opt = torch.optim.Adam(D1.parameters(), lr=LR_D, betas=(0.5, 0.9))
+    d2_opt = torch.optim.Adam(D2.parameters(), lr=LR_D, betas=(0.5, 0.9))
+    dataset = LPIDataset(50000, use_radioml=USE_RADIOML)
+    loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
+
+    for epoch in range(1, EPOCHS + 1):
+        if epoch > 1 and (epoch - 1) % D2_RESET_EVERY == 0:
+            print(f"\n*** Epoch {epoch}: Resetting D2 ***")
+            D2 = Discriminator().to(DEVICE)
+            d2_opt = torch.optim.Adam(D2.parameters(), lr=LR_D, betas=(0.5, 0.9))
+        d1_losses, d2_losses, g_losses, rec_losses = [], [], [], []
+        for batch_idx, (b, real_signal) in enumerate(loader):
+            b = b.to(DEVICE); real = real_signal.to(DEVICE); B = b.size(0)
+            z = torch.randn(B, Z_DIM, device=DEVICE)
+            with torch.no_grad(): fake = G(z, b)
+            d1_real = D1(real).mean(); d1_fake = D1(fake).mean()
+            loss_d1 = -(d1_real - d1_fake)
+            d1_opt.zero_grad(); loss_d1.backward(); d1_opt.step()
+            for p in D1.parameters(): p.data.clamp_(-CLIP, CLIP)
+            d2_real = D2(real).mean(); d2_fake = D2(fake).mean()
+            loss_d2 = -(d2_real - d2_fake)
+            d2_opt.zero_grad(); loss_d2.backward(); d2_opt.step()
+            for p in D2.parameters(): p.data.clamp_(-CLIP, CLIP)
+            d1_losses.append(loss_d1.item()); d2_losses.append(loss_d2.item())
+            if batch_idx % N_CRITIC == 0:
+                z = torch.randn(B, Z_DIM, device=DEVICE)
+                fake = G(z, b); b_hat = Dec(fake)
+                g_d1 = -D1(fake).mean(); g_d2 = -D2(fake).mean(); g_rec = F.mse_loss(b_hat, b)
+                loss_g = (g_d1 + W_D2 * g_d2 + W_REC * g_rec +
+                          W_MEAN * loss_mean(fake) + W_VAR * loss_var(fake) +
+                          W_KURT * loss_kurtosis(fake) + W_SPEC * loss_spectral(fake, real) +
+                          W_CYCLO * loss_cyclo(fake) + W_XCORR * loss_iq_xcorr(fake) + W_DIV * loss_diversity(fake))
+                g_opt.zero_grad(); loss_g.backward(); g_opt.step()
+                g_losses.append(loss_g.item()); rec_losses.append(g_rec.item())
+        print(f"Epoch {epoch:03d}/{EPOCHS} | D1:{np.mean(d1_losses):.3f} D2:{np.mean(d2_losses):.3f} G:{np.mean(g_losses):.3f} Rec:{np.mean(rec_losses):.4f}")
+        if epoch % 10 == 0:
+            torch.save({'epoch': epoch, 'generator': G.state_dict(), 'decoder': Dec.state_dict(),
+                        'd1': D1.state_dict(), 'd2': D2.state_dict(), 'g_opt': g_opt.state_dict()}, CHECKPOINT)
+            print(f"  -> Saved {CHECKPOINT}")
+    print("\nTraining complete. Run: python export_for_grc.py")
+
+if __name__ == '__main__':
+    main()

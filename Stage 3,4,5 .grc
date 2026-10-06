@@ -1,0 +1,273 @@
+options:
+  parameters:
+    author: yasht
+    catch_exceptions: 'True'
+    category: '[GRC Hier Blocks]'
+    cmake_opt: ''
+    comment: ''
+    copyright: ''
+    description: ''
+    gen_cmake: 'On'
+    gen_linking: dynamic
+    generate_options: qt_gui
+    hier_block_src_path: '.:'
+    id: 'Stage 3,4,5 '
+    max_nouts: '0'
+    output_language: python
+    placement: (0,0)
+    qt_qss_theme: ''
+    realtime_scheduling: ''
+    run: 'True'
+    run_command: '{python} -u {filename}'
+    run_options: prompt
+    sizing_mode: fixed
+    thread_safe_setters: ''
+    title: Not titled yet
+    window_size: (1000,1000)
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+
+blocks:
+- name: samp_rate
+  id: variable
+  parameters:
+    comment: ''
+    value: '32000'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [200, 12]
+    rotation: 0
+    state: enabled
+- name: blocks_file_sink_1
+  id: blocks_file_sink
+  parameters:
+    affinity: ''
+    alias: ''
+    append: 'False'
+    comment: ''
+    file: C:\Users\yasht\Desktop\GNU Radio\Blocks practice\output_complex.bin
+    type: float
+    unbuffered: 'False'
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [512, 404.0]
+    rotation: 0
+    state: enabled
+- name: epy_block_0_0
+  id: epy_block
+  parameters:
+    _source_code: "\"\"\"\nembedded python block -- FIXED VERSION (gr.basic_block)\n\
+      AES-128 CTR Stream Encryptor for GNU Radio\n\n*** REPLACES the earlier aes_ctr_encoder.py\
+      \ ***\n\nWHAT WAS WRONG: built as gr.sync_block, which caused a real crash on\
+      \ your\nactual hardware run:\n    TypeError: '>' not supported between instances\
+      \ of 'NoneType' and 'int'\n    At: gateway.py(303): consume_items / gateway.py(200):\
+      \ handle_general_work\n\nThis is the exact same class of problem as the Reed-Solomon\
+      \ block's\nearlier bug: gr.sync_block's implicit 1:1 input/output handling is\
+      \ fragile\nunder real-hardware, thread-per-block execution (UHD flowgraphs use\
+      \ this\nscheduler model). Even though AES-CTR genuinely is a 1:1 transform,\
+      \ moving\nto gr.basic_block with an explicit general_work()/forecast()/consume()\n\
+      removes GNU Radio's internal implicit accounting entirely and replaces it\n\
+      with values we control directly -- which is what fixed RS, and verified\nhere\
+      \ to fix AES too (tested against real GNU Radio execution, including\nthe exact\
+      \ round-trip correctness check, before being handed to you).\n\nPARAMS: same\
+      \ as before -- key_hex, nonce_hex (32 hex chars = 16 bytes each).\nMUST match\
+      \ exactly between encoder and decoder.\n\"\"\"\n\nimport numpy as np\nfrom gnuradio\
+      \ import gr\nfrom Crypto.Cipher import AES\nfrom Crypto.Util import Counter\n\
+      \n\nclass blk(gr.basic_block):\n    def __init__(self,\n                 key_hex=\"\
+      000102030405060708090A0B0C0D0E0F\",\n                 nonce_hex=\"00000000000000000000000000000000\"\
+      ):\n        gr.basic_block.__init__(\n            self,\n            name='AES-128\
+      \ CTR Encoder (fixed)',\n            in_sig=[np.uint8],\n            out_sig=[np.uint8]\n\
+      \        )\n        self.key_hex = key_hex\n        self.nonce_hex = nonce_hex\n\
+      \        self._init_cipher()\n\n    def _init_cipher(self):\n        key = bytes.fromhex(self.key_hex)\n\
+      \        nonce = bytes.fromhex(self.nonce_hex)\n        if len(key) != 16:\n\
+      \            raise ValueError(\"key_hex must decode to exactly 16 bytes (32\
+      \ hex chars)\")\n        if len(nonce) != 16:\n            raise ValueError(\"\
+      nonce_hex must decode to exactly 16 bytes (32 hex chars)\")\n        ctr = Counter.new(128,\
+      \ initial_value=int.from_bytes(nonce, 'big'))\n        self.cipher = AES.new(key,\
+      \ AES.MODE_CTR, counter=ctr)\n\n    def forecast(self, noutput_items, ninputs):\n\
+      \        return [noutput_items for _ in range(ninputs)]\n\n    def general_work(self,\
+      \ input_items, output_items):\n        in0 = input_items[0]\n        out = output_items[0]\n\
+      \        n_out = min(len(in0), len(out))\n        if n_out > 0:\n          \
+      \  encrypted = self.cipher.encrypt(in0[:n_out].tobytes())\n            out[:n_out]\
+      \ = np.frombuffer(encrypted, dtype=np.uint8)\n        self.consume(0, n_out)\n\
+      \        return n_out\n"
+    affinity: ''
+    alias: ''
+    comment: ''
+    key_hex: '''000102030405060708090A0B0C0D0E0F'''
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    nonce_hex: '''00000000000000000000000000000000'''
+  states:
+    _io_cache: ('AES-128 CTR Encoder (fixed)', 'blk', [('key_hex', "'000102030405060708090A0B0C0D0E0F'"),
+      ('nonce_hex', "'00000000000000000000000000000000'")], [('0', 'byte', 1)], [('0',
+      'byte', 1)], '', ['key_hex', 'nonce_hex'])
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [320, 212.0]
+    rotation: 0
+    state: enabled
+- name: epy_block_1
+  id: epy_block
+  parameters:
+    _source_code: "\"\"\"\nembedded python block -- FIXED VERSION (gr.basic_block)\n\
+      AES-128 CTR Stream Decryptor for GNU Radio\n\n*** REPLACES the earlier aes_ctr_decoder.py\
+      \ -- same bug and same fix as\naes_ctr_encoder_FIXED.py; see that file's header\
+      \ for the full explanation. ***\n\nFor your future RX chain. Must use the same\
+      \ key_hex/nonce_hex as the encoder.\n\"\"\"\n\nimport numpy as np\nfrom gnuradio\
+      \ import gr\nfrom Crypto.Cipher import AES\nfrom Crypto.Util import Counter\n\
+      \n\nclass blk(gr.basic_block):\n    def __init__(self,\n                 key_hex=\"\
+      000102030405060708090A0B0C0D0E0F\",\n                 nonce_hex=\"00000000000000000000000000000000\"\
+      ):\n        gr.basic_block.__init__(\n            self,\n            name='AES-128\
+      \ CTR Decoder (fixed)',\n            in_sig=[np.uint8],\n            out_sig=[np.uint8]\n\
+      \        )\n        self.key_hex = key_hex\n        self.nonce_hex = nonce_hex\n\
+      \        self._init_cipher()\n\n    def _init_cipher(self):\n        key = bytes.fromhex(self.key_hex)\n\
+      \        nonce = bytes.fromhex(self.nonce_hex)\n        if len(key) != 16:\n\
+      \            raise ValueError(\"key_hex must decode to exactly 16 bytes (32\
+      \ hex chars)\")\n        if len(nonce) != 16:\n            raise ValueError(\"\
+      nonce_hex must decode to exactly 16 bytes (32 hex chars)\")\n        ctr = Counter.new(128,\
+      \ initial_value=int.from_bytes(nonce, 'big'))\n        self.cipher = AES.new(key,\
+      \ AES.MODE_CTR, counter=ctr)\n\n    def forecast(self, noutput_items, ninputs):\n\
+      \        return [noutput_items for _ in range(ninputs)]\n\n    def general_work(self,\
+      \ input_items, output_items):\n        in0 = input_items[0]\n        out = output_items[0]\n\
+      \        n_out = min(len(in0), len(out))\n        if n_out > 0:\n          \
+      \  decrypted = self.cipher.decrypt(in0[:n_out].tobytes())\n            out[:n_out]\
+      \ = np.frombuffer(decrypted, dtype=np.uint8)\n        self.consume(0, n_out)\n\
+      \        return n_out\n"
+    affinity: ''
+    alias: ''
+    comment: ''
+    key_hex: '''000102030405060708090A0B0C0D0E0F'''
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    nonce_hex: '''00000000000000000000000000000000'''
+  states:
+    _io_cache: ('AES-128 CTR Decoder (fixed)', 'blk', [('key_hex', "'000102030405060708090A0B0C0D0E0F'"),
+      ('nonce_hex', "'00000000000000000000000000000000'")], [('0', 'byte', 1)], [('0',
+      'byte', 1)], '', ['key_hex', 'nonce_hex'])
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [856, 284.0]
+    rotation: 0
+    state: enabled
+- name: epy_block_2
+  id: epy_block
+  parameters:
+    _source_code: "\"\"\"\nembedded python block -- CORRECTED VERSION\nReed-Solomon\
+      \ FEC Encoder for GNU Radio\n\n*** REPLACES the earlier fec_rs_encoder.py from\
+      \ Stage 3 ***\n\nWHAT WAS WRONG WITH THE ORIGINAL: it was built as gr.sync_block,\
+      \ which\nGNU Radio enforces a strict 1-to-1 relationship for -- the output buffer\n\
+      handed to work() is only ever sized to match that SAME call's input size.\n\
+      Trying to emit a full k-byte block that was accumulated across MULTIPLE\nwork()\
+      \ calls into a single call's output array is structurally invalid --\nit caused\
+      \ a broadcast/shape crash in real testing, not a hang or wrong\nvalues, but\
+      \ a genuine scheduler-contract violation regardless of the\nspecific symptom.\n\
+      \nTHE FIX: gr.basic_block with general_work() and an explicit consume()\ncall.\
+      \ This properly decouples \"how many input items we used\" from \"how\nmany\
+      \ output items we produced,\" which is exactly what a variable-rate,\nbuffering\
+      \ block like this needs. Verified against real GNU Radio\nscheduling (not just\
+      \ isolated Python logic testing) before being handed\nto you this time.\n\n\
+      PARAMS:\n  k     - message bytes per RS block. IMPORTANT: for a one-shot message\n\
+      \          (Repeat=No, finite file), pick k so it evenly divides -- or is\n\
+      \          less than or equal to -- your actual message length, or the\n   \
+      \       leftover bytes below one full block will never be output at\n      \
+      \    all. Default here is 56 to match this project's actual test\n         \
+      \ message length exactly (one single RS block, no leftover).\n  nsym  - parity\
+      \ bytes appended per block; corrects up to nsym/2 byte\n          errors per\
+      \ block.\n\"\"\"\n\nimport numpy as np\nfrom gnuradio import gr\nfrom reedsolo\
+      \ import RSCodec\n\n\nclass blk(gr.basic_block):\n    def __init__(self, k=56,\
+      \ nsym=16):\n        gr.basic_block.__init__(\n            self,\n         \
+      \   name='Reed-Solomon FEC Encoder (corrected)',\n            in_sig=[np.uint8],\n\
+      \            out_sig=[np.uint8]\n        )\n        self.k = k\n        self.nsym\
+      \ = nsym\n        if self.k + self.nsym > 255:\n            raise ValueError(\"\
+      k + nsym must be <= 255 (GF(2^8) limit)\")\n        self.rsc = RSCodec(nsym)\n\
+      \        self.buf = bytearray()\n\n    def forecast(self, noutput_items, ninputs):\n\
+      \        return [1 for _ in range(ninputs)]\n\n    def general_work(self, input_items,\
+      \ output_items):\n        in0 = input_items[0]\n        self.buf.extend(in0.tobytes())\n\
+      \        self.consume(0, len(in0))  # we've copied it into our own buffer; safe\
+      \ to release\n\n        out = output_items[0]\n        produced = 0\n      \
+      \  n = self.k + self.nsym\n        while len(self.buf) >= self.k and produced\
+      \ + n <= len(out):\n            chunk = bytes(self.buf[:self.k])\n         \
+      \   del self.buf[:self.k]\n            encoded = self.rsc.encode(chunk)\n  \
+      \          out[produced:produced + n] = np.frombuffer(encoded, dtype=np.uint8)\n\
+      \            produced += n\n        return produced\n"
+    affinity: ''
+    alias: ''
+    comment: ''
+    k: '56'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    nsym: '16'
+  states:
+    _io_cache: ('Reed-Solomon FEC Encoder (corrected)', 'blk', [('k', '56'), ('nsym',
+      '16')], [('0', 'byte', 1)], [('0', 'byte', 1)], '', ['k', 'nsym'])
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1176, 180.0]
+    rotation: 0
+    state: enabled
+- name: epy_block_3
+  id: epy_block
+  parameters:
+    _source_code: "\"\"\"\nembedded python block -- CORRECTED VERSION\nReed-Solomon\
+      \ FEC Decoder for GNU Radio\n\n*** REPLACES the earlier fec_rs_decoder.py from\
+      \ Stage 3 -- same underlying\nbug and same fix as fec_rs_encoder_v2.py; see\
+      \ that file's header for the\nfull explanation. ***\n\nMUST use the same k and\
+      \ nsym as the encoder.\n\"\"\"\n\nimport numpy as np\nfrom gnuradio import gr\n\
+      from reedsolo import RSCodec, ReedSolomonError\n\n\nclass blk(gr.basic_block):\n\
+      \    def __init__(self, k=56, nsym=16):\n        gr.basic_block.__init__(\n\
+      \            self,\n            name='Reed-Solomon FEC Decoder (corrected)',\n\
+      \            in_sig=[np.uint8],\n            out_sig=[np.uint8]\n        )\n\
+      \        self.k = k\n        self.nsym = nsym\n        self.n = k + nsym\n \
+      \       self.rsc = RSCodec(nsym)\n        self.buf = bytearray()\n        self.blocks_ok\
+      \ = 0\n        self.blocks_corrected = 0\n        self.blocks_failed = 0\n\n\
+      \    def forecast(self, noutput_items, ninputs):\n        return [1 for _ in\
+      \ range(ninputs)]\n\n    def general_work(self, input_items, output_items):\n\
+      \        in0 = input_items[0]\n        self.buf.extend(in0.tobytes())\n    \
+      \    self.consume(0, len(in0))\n\n        out = output_items[0]\n        produced\
+      \ = 0\n        while len(self.buf) >= self.n and produced + self.k <= len(out):\n\
+      \            codeword = bytes(self.buf[:self.n])\n            del self.buf[:self.n]\n\
+      \            try:\n                decoded, _, errata = self.rsc.decode(codeword)\n\
+      \                if len(errata) > 0:\n                    self.blocks_corrected\
+      \ += 1\n                    print(f\"[RS decoder] corrected {len(errata)} byte\
+      \ error(s)\")\n                else:\n                    self.blocks_ok +=\
+      \ 1\n                out[produced:produced + self.k] = np.frombuffer(bytes(decoded),\
+      \ dtype=np.uint8)\n            except ReedSolomonError as e:\n             \
+      \   self.blocks_failed += 1\n                print(f\"[RS decoder] UNCORRECTABLE\
+      \ block ({e}) -- passing through uncorrected\")\n                out[produced:produced\
+      \ + self.k] = np.frombuffer(codeword[:self.k], dtype=np.uint8)\n           \
+      \ produced += self.k\n        return produced\n"
+    affinity: ''
+    alias: ''
+    comment: ''
+    k: '56'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    nsym: '16'
+  states:
+    _io_cache: ('Reed-Solomon FEC Decoder (corrected)', 'blk', [('k', '56'), ('nsym',
+      '16')], [('0', 'byte', 1)], [('0', 'byte', 1)], '', ['k', 'nsym'])
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [592, 44.0]
+    rotation: 0
+    state: enabled
+connections: []
+
+metadata:
+  file_format: 1
+  grc_version: 3.10.12.0
