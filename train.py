@@ -31,7 +31,7 @@ Other changes:
 """
 import os, argparse, math, numpy as np, torch, torch.nn as nn, torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
-from models import Generator, Discriminator, Decoder
+from models import Generator, Discriminator, Decoder, GlobalDecoder
 
 # ==================== CONFIG ====================
 DEVICE       = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -232,9 +232,8 @@ class Detector(nn.Module):
 
 def train_detector(G, real_bank=None, steps=60, batch=64):
     """Threat-model detector. Its 'real' class is half pure AWGN and half
-    real-world captures (GOLD) when a bank is available, so the generator
-    must evade a detector that knows what genuine over-the-air signals
-    look like -- not just synthetic noise."""
+    available GOLD/RadioML reference captures when a bank is present; the
+    adversary remains only one small detector and is not a general RF test."""
     det = Detector().to(DEVICE)
     opt = torch.optim.Adam(det.parameters(), lr=1e-4)
     half = batch // 2
@@ -299,8 +298,18 @@ def main():
 
     print(f"[TRAIN] Device: {DEVICE} | samples: {args.n_samples} | epochs: {args.epochs} | RadioML mix: {args.radioml}")
 
+    resume_ckpt = None
+    decoder_arch = 'conv_v1'
+    if args.resume and os.path.exists(args.out):
+        try:
+            resume_ckpt = torch.load(args.out, map_location=DEVICE, weights_only=False)
+        except TypeError:
+            resume_ckpt = torch.load(args.out, map_location=DEVICE)
+        decoder_arch = resume_ckpt.get('decoder_arch', 'conv_v1')
+    DecoderClass = GlobalDecoder if decoder_arch == 'global_mlp_v1' else Decoder
+
     G     = Generator(msg_len=MSG_LEN, z_dim=Z_DIM, out_len=FRAME_LEN * 2).to(DEVICE)
-    Dec   = Decoder(msg_len=MSG_LEN).to(DEVICE)
+    Dec   = DecoderClass(msg_len=MSG_LEN).to(DEVICE)
     # NOTE: the WGAN critics (D1/D2) were removed. Their unbounded linear
     # scores ran away (D1(fake) reached +138), drowning every statistical
     # loss in the generator gradient. The sigmoid-bounded threat-model
@@ -310,15 +319,15 @@ def main():
     dec_opt = torch.optim.Adam(Dec.parameters(), lr=2e-4, betas=(0.5, 0.9))  # stepped every batch
 
     start_epoch = 1
-    if args.resume and os.path.exists(args.out):
-        ckpt = torch.load(args.out, map_location=DEVICE)
-        G.load_state_dict(ckpt['generator']); Dec.load_state_dict(ckpt['decoder'])
+    if resume_ckpt is not None:
+        G.load_state_dict(resume_ckpt['generator'])
+        Dec.load_state_dict(resume_ckpt['decoder'])
         try:
-            g_opt.load_state_dict(ckpt['g_opt'])
+            g_opt.load_state_dict(resume_ckpt['g_opt'])
         except (KeyError, ValueError):
             print("  (optimizer state not compatible -- starting optimizers fresh)")
-        start_epoch = ckpt['epoch'] + 1
-        print(f"Resumed from {args.out} at epoch {ckpt['epoch']}")
+        start_epoch = resume_ckpt['epoch'] + 1
+        print(f"Resumed from {args.out} at epoch {resume_ckpt['epoch']} (decoder={decoder_arch})")
 
     dataset = LPIDataset(args.n_samples, use_radioml=args.radioml, data_path=args.data)
     loader = DataLoader(dataset, batch_size=args.batch, shuffle=True, num_workers=0)
@@ -385,7 +394,7 @@ def main():
               f"monitor-BER:{ber*100:.2f}%", flush=True)
 
         torch.save({'epoch': epoch, 'generator': G.state_dict(), 'decoder': Dec.state_dict(),
-                    'g_opt': g_opt.state_dict()}, args.out)
+                    'decoder_arch': decoder_arch, 'g_opt': g_opt.state_dict()}, args.out)
         det = train_detector(G, dataset.gold_bank, steps=60)  # refresh for next epoch
         print(f"  detector acc on fresh gen: {detector_accuracy(det, G)*100:.1f}%", flush=True)
 

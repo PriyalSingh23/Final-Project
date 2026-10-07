@@ -6,14 +6,19 @@ The GOLD dataset ships as GOLD_XYZ_OSC.0001_1024.hdf5:
     Y : (N, 24)   int64       -- one-hot labels (satellite IDs)
     Z : (N, 1)    int64       -- capture metadata
 
-Usage in training: real-world (non-AWGN) reference frames are mixed into
-the threat-detector training so the generator must evade a detector that
-has seen genuine over-the-air signals, not just synthetic noise.
+Usage in training: available capture frames may be added as reference
+examples for the threat-model detector. They are not used as the generator's
+spectral target and are not evidence of performance on a live RF channel.
 
 The file is ~21 GB; we never load it whole -- a random subset is read in
 sorted chunks (fast contiguous access) and normalized per sample.
 """
-import os, glob, numpy as np, h5py
+import os, glob, numpy as np
+
+try:
+    import h5py
+except ImportError:  # only needed when a GOLD HDF5 capture is present
+    h5py = None
 
 GLOB_PATTERNS = ("*.hdf5", "*/*.hdf5", "*.h5", "*/*.h5")   # covers the common
                                                            # "downloaded as a
@@ -38,6 +43,8 @@ def load_gold(path, n_take=25000, target_len=512, seed=1234, batch_chunk=2000):
     Each 1024-sample capture contributes one target_len window (random start),
     so the mixed dataset is not temporally aligned to any capture boundary.
     """
+    if h5py is None:
+        raise RuntimeError("GOLD HDF5 loading requires h5py; install it with 'pip install h5py'")
     print(f"[GOLD] Opening {path} ...")
     rng = np.random.default_rng(seed)
     with h5py.File(path, "r") as f:
@@ -64,14 +71,27 @@ def load_gold(path, n_take=25000, target_len=512, seed=1234, batch_chunk=2000):
 
 
 def find_and_load_real(n_real, target_len=512, explicit=None, cwd="."):
-    """Try GOLD hdf5 first, then the classic RML2018.01A.pkl; else None."""
-    path = find_hdf5(explicit, cwd)
-    if path:
-        try:
-            return load_gold(path, n_take=n_real, target_len=target_len)
-        except Exception as e:
-            print(f"[GOLD] failed ({e}); falling back.")
-    pkl = os.path.join(cwd, "RML2018.01A.pkl")
+    """Load an explicit GOLD/RadioML file, otherwise discover either locally."""
+    explicit_path = os.fspath(explicit) if explicit is not None else None
+    if explicit_path:
+        if not os.path.isfile(explicit_path):
+            print(f"[DATA] explicit dataset path does not exist: {explicit_path}")
+            return None
+        if explicit_path.lower().endswith((".h5", ".hdf5")):
+            return load_gold(explicit_path, n_take=n_real, target_len=target_len)
+        if explicit_path.lower().endswith((".pkl", ".pickle")):
+            pkl = explicit_path
+        else:
+            raise ValueError("--data must be a GOLD .h5/.hdf5 or RadioML .pkl/.pickle file")
+    else:
+        path = find_hdf5(None, cwd)
+        if path:
+            try:
+                return load_gold(path, n_take=n_real, target_len=target_len)
+            except Exception as e:
+                print(f"[GOLD] failed ({e}); trying RadioML pickle: {e}")
+        pkl = os.path.join(cwd, "RML2018.01A.pkl")
+
     if os.path.isfile(pkl):
         from dataset_radioml import load_radioml
         samples, _ = load_radioml(pkl, target_len)

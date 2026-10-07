@@ -1,0 +1,38 @@
+{
+  "generated_at": "2026-10-07T13:17:50.584579+00:00",
+  "checkpoint": "lpi_checkpoint.pt",
+  "checkpoint_epoch": 610,
+  "decoder_arch": "global_mlp_v1",
+  "checkpoint_sha256": "6bc1293cc98350d540db90a134370b573ce2fa015212833b8d0cf241de64963d",
+  "device": "cpu",
+  "seed": 2026,
+  "measurement_scope": "synthetic offline model diagnostics; no RF/SDR channel",
+  "metrics": {
+    "ks_pvalue": 0.2958245277404785,
+    "ks_statistic": 0.0006824044081614744,
+    "pooled_mean": 0.00039083141018636525,
+    "pooled_std": 1.0002192258834839,
+    "ks_sample_values": 2048000,
+    "cyclo_ratio": 2.0738717574010406,
+    "adversary_accuracy": 55.2,
+    "adversary_accuracy_pct": 55.2,
+    "ber": 0.0108921875,
+    "ber_pct": 1.0892187500000001,
+    "ber_bits": 1280000
+  },
+  "targets": {
+    "ks_pvalue_min": 0.05,
+    "ks_pvalue_aspirational": 0.85,
+    "adversary_accuracy_pct_range": [
+      48.0,
+      56.0
+    ],
+    "ber_max": 0.01
+  },
+  "passed": {
+    "ks_pvalue": true,
+    "adversary": true,
+    "ber": false,
+    "all": false
+  }
+}

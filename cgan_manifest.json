@@ -1,0 +1,33 @@
+{
+  "format": 1,
+  "created_at": "2026-10-07T13:17:52.167536+00:00",
+  "checkpoint": "lpi_checkpoint.pt",
+  "checkpoint_epoch": 610,
+  "decoder_arch": "global_mlp_v1",
+  "checkpoint_sha256": "6bc1293cc98350d540db90a134370b573ce2fa015212833b8d0cf241de64963d",
+  "generator": {
+    "path": "generator_lpi.pt",
+    "sha256": "5360fd5303e8a04861e0cd4c3b5408466ae402418668fd90851f14cfd63fbc02",
+    "input": {
+      "latent": 64,
+      "message_bits": 256
+    },
+    "output": [
+      2,
+      512
+    ]
+  },
+  "decoder": {
+    "path": "decoder_lpi.pt",
+    "sha256": "ace920feb8f301cf75a535a373e2a7487aaecc077299e26acf61f985b9e5775e",
+    "input": [
+      2,
+      512
+    ],
+    "output_bits": 256
+  },
+  "validated_batch_sizes": [
+    1,
+    3
+  ]
+}

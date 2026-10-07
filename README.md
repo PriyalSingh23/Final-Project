@@ -1,457 +1,159 @@
-# ShadowComm LPI-CGAN: Complete Deployment Guide
+# ShadowComm CGAN waveform-generation demo
 
-> **Low Probability of Intercept (LPI) Secure Messaging Platform**
-> AES-128-CTR + Reed-Solomon + Conditional GAN Covert Waveform + USRP Over-the-Air
+> **Research prototype / offline simulation.** The Flask app generates IQ arrays and performs a simulated model-to-model decode. It does not control a USRP or transmit over the air. Synthetic metrics are not evidence of low probability of intercept (LPI), RF security, or channel reliability.
 
----
+## Scope and implementation
 
-## Table of Contents
+The model accepts 256 bipolar message symbols and a 64-dimensional latent vector, then emits an IQ frame shaped `(2, 512)`. The decoder returns 256 bit probabilities. The current demo path is:
 
-1. [What You Are Building](#1-what-you-are-building)
-2. [Folder Structure](#2-folder-structure)
-3. [Phase 0: Install Everything](#3-phase-0-install-everything)
-4. [Phase 1: Train the CGAN](#4-phase-1-train-the-cgan)
-5. [Phase 2: Export for GRC](#5-phase-2-export-for-grc)
-6. [Phase 3: Verify Metrics](#6-phase-3-verify-metrics)
-7. [Phase 4: GNU Radio TX/RX](#7-phase-4-gnu-radio-txrx)
-8. [Phase 5: Web App Interface](#8-phase-5-web-app-interface)
-9. [Phase 6: Field Deployment](#9-phase-6-field-deployment)
-10. [Troubleshooting](#10-troubleshooting)
-11. [Complete File Index](#11-complete-file-index)
-
----
-
-## 1. What You Are Building
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         TRANSMITTER (TX)                                     │
-│  Plaintext → AES-128-CTR → RS(255,223) → BPSK Mapper (-1,+1)               │
-│  → CGAN Generator [z(64), b(256)] → Covert Waveform (2×512 IQ)              │
-│  → RRC Filter → GLFSR Spreading → USRP Sink → OVER THE AIR                  │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                      ↓
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         RECEIVER (RX)                                        │
-│  USRP Source → CGAN Decoder → Recovered BPSK (-1,+1)                       │
-│  → Pack K Bits → RS Decoder → AES Decrypt → Plaintext                       │
-└─────────────────────────────────────────────────────────────────────────────┘
+```text
+text → AES-CTR demo wrapper → RS(255,191) encoding + byte interleaving → 256-bit frames
+     → TorchScript CGAN → in-memory IQ array / .npy download
+     → TorchScript decoder → Reed–Solomon decode → text
 ```
 
-**Key Features:**
-- **AES-128-CTR**: Military-grade encryption
-- **RS(255,223)**: Corrects up to 16 byte errors per block
-- **CGAN LPI**: Waveform statistically identical to AWGN (KS p-value > 0.85)
-- **Dual Discriminators**: D2 resets every 25 epochs for dynamic evasion
-- **9-Component Loss**: Gaussianity, spectral flatness, cyclostationary suppression
-- **Web Interface**: Signal-like chat app with SDR control, spectrum, metrics
+The app's loopback has **no RF channel** between generator and decoder. `tx_lpi_cgan.grc` and `rx_lpi_cgan.grc` are separate GNU Radio artifacts; they have not been validated by this work on hardware. The spectrum panel is simulated UI data.
 
----
+The encryption path is also demonstration-only: the current implementation uses a default key if no environment key is provided, a fixed AES-CTR counter, and no authentication tag or per-message nonce. **Do not use it for sensitive messages or production security.**
 
-## 2. Folder Structure
+## Source material and training provenance
 
-```
-LPI_CGAN/
-├── models.py                    # Generator, Discriminator, Decoder
-├── train.py                     # Basic training (AWGN only)
-├── train_radioml.py             # Training with RadioML dataset
-├── dataset_radioml.py           # RadioML 2018.01A downloader/loader
-├── export_for_grc.py            # Export to TorchScript
-├── test_metrics.py              # Verify KS, adversary accuracy, BER
-├── requirements.txt             # Python dependencies
-│
-├── grc/
-│   ├── tx_lpi_cgan.grc         # GNU Radio Transmitter flowgraph
-│   └── rx_lpi_cgan.grc         # GNU Radio Receiver flowgraph
-│
-├── webapp/
-│   ├── app.py                   # Flask backend
-│   └── templates/
-│       └── index.html           # Web UI (Signal-like chat)
-│
-└── README.md                    # This file
-```
+The Google Drive folders `Colab Notebooks` and `LPI_SDR_Project` were reviewed. The Colab notebook clones this repository and contains short training experiments; the project folder contains checkpoint/log material. The supplied `datasets` folder was empty when checked, so the reported training/evaluation here uses synthetic AWGN rather than user-provided RF captures. Optional GOLD/RadioML examples, when supplied, are used only for the threat-model detector; they do not replace the generator's synthetic AWGN spectral reference.
 
----
+The selected generator starts from `lpi_checkpoint_v3_610.pt` (epoch 610). The convolutional decoder plateaued above the BER screening threshold, so a global-receptive-field MLP decoder was trained with the generator frozen. Training details, selected validation point, and later non-improving runs are recorded in [`TRAINING_REPORT.md`](TRAINING_REPORT.md). The checkpoint retains the original generator; `decoder_training` records its validation result and decoder-step counter.
 
-## 3. Phase 0: Install Everything
+## Current model and offline results
 
-### 3.1 Create Project Folder
+The deployed pair is described by `cgan_manifest.json`; `lpi_metrics.json` is the machine-readable offline report. The app only loads report values when its checkpoint hash matches the manifest. Results below are synthetic, noiseless model diagnostics—not OTA measurements.
 
-```cmd
-mkdir C:\Users\yasht\Desktop\LPI_CGAN
-cd C:\Users\yasht\Desktop\LPI_CGAN
-```
+| Measure | Screening criterion | Latest result |
+|---|---:|---:|
+| Pooled marginal KS p-value vs. standard normal | > 0.05 (0.85 is aspirational) | 0.2958 — standard screen pass; aspirational target not met |
+| One freshly trained CNN: generated-vs-AWGN accuracy | 48–56% | 55.2% — screen pass for this one detector |
+| Generator-to-decoder bit error rate, no channel | < 1% | 1.0892% — fail |
+| Short-lag autocorrelation ratio | Diagnostic only; not a formal cyclostationarity test | 2.07× |
 
-### 3.2 Install Python Dependencies
+A p-value is sample-size dependent, and one CNN is only one detector. Passing these checks does not establish covertness or RF performance. See the [RF validation plan](FIELD_TEST_CHECKLIST.md) before considering hardware testing.
 
-**Open Command Prompt (or Anaconda Prompt) and run:**
+## Repository layout
 
-```cmd
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-pip install numpy scipy flask flask-socketio pycryptodome reedsolo requests
-```
+| Path | Purpose |
+|---|---|
+| `models.py` | Generator, convolutional decoder, global decoder |
+| `train.py` | Joint generator/decoder training with synthetic AWGN and an auxiliary detector |
+| `train_decoder_global.py` | Decoder-only training with the generator frozen |
+| `finetune_decoder.py` | Fine-tune the legacy convolutional decoder |
+| `sweep.py` | Resume training and log checkpoint metrics |
+| `dataset_gold.py`, `dataset_radioml.py` | Optional capture loaders; datasets are not bundled |
+| `test_metrics.py` | Offline marginal KS, one-CNN adversary, autocorrelation diagnostic, noiseless BER |
+| `export_for_grc.py` | TorchScript export, smoke test, and hash manifest |
+| `app.py`, `index.html` | Flask/Socket.IO offline demo and browser UI |
+| `generator_lpi.pt`, `decoder_lpi.pt` | Deployed TorchScript models |
+| `lpi_checkpoint.pt` | Selected training checkpoint |
+| `tx_lpi_cgan.grc`, `rx_lpi_cgan.grc` | Separate GNU Radio flowgraphs; hardware behavior not verified here |
+| `tests/` | Flask/API integration smoke tests |
 
-**For GNU Radio specifically (if using radioconda):**
-```cmd
-conda activate gnuradio
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-pip install pycryptodome reedsolo numpy scipy
-```
+## Install
 
-### 3.3 Verify Installation
+Run commands from the repository root. Python 3.10+ is recommended.
 
-```cmd
-python -c "import torch, gnuradio, numpy, scipy, flask, Crypto, reedsolo; print('ALL OK')"
-```
-
-If this prints `ALL OK`, proceed. If any module fails, install it individually.
-
-### 3.4 Install UHD (USRP Drivers)
-
-```cmd
-:: Ubuntu/Linux
-sudo apt install libuhd-dev uhd-host
-
-:: Windows: Download from Ettus Research website
-:: https://www.ettus.com/all-products/ub210-kit/
-```
-
-### 3.5 Verify USRP Detection
-
-```cmd
-uhd_find_devices
-```
-
-You should see your USRP serial number.
-
----
-
-## 4. Phase 1: Train the CGAN
-
-### 4.1 Option A: Basic Training (AWGN Only, Fast)
-
-```cmd
-cd C:\Users\yasht\Desktop\LPI_CGAN
-python train.py
-```
-
-- Trains on 50,000 synthetic AWGN samples
-- Takes 30-60 minutes on CPU
-- Good for initial testing
-
-### 4.2 Option B: RadioML Training (Real-World Data, Recommended)
-
-**Step 1: Download RadioML 2018.01A**
-
-```cmd
-python dataset_radioml.py
-```
-
-This downloads `RML2018.01A.pkl` (~2.5 GB). If automatic download fails:
-1. Go to https://www.deepsig.ai/datasets
-2. Download `RML2018.01A.pkl` manually
-3. Place it in `C:\Users\yasht\Desktop\LPI_CGAN\`
-
-**Step 2: Train with Mixed Dataset**
-
-```cmd
-python train_radioml.py
-```
-
-**What makes this better:**
-- Discriminator sees **real QPSK, QAM16, QAM64, OFDM, PSK, FSK** from actual RF captures
-- Your generator must evade detectors trained on **real-world signals**, not just synthetic noise
-- 3× data augmentation by windowing each 1024-sample frame into overlapping 512-sample chunks
-
-**Training output:**
-```
-Epoch 010/200 | D1:-0.342 D2:-0.298 G:4.521 Rec:0.0087
-  -> Saved lpi_checkpoint.pt
-Epoch 020/200 | D1:-0.298 D2:-0.312 G:3.982 Rec:0.0054
-...
-```
-
-**When to stop:**
-- `Rec` (reconstruction loss) drops below `0.01` — your decoder can recover messages
-- `G` stabilizes around 2-5 — generator is converged
-- Train for at least 100 epochs for good results
-
----
-
-## 5. Phase 2: Export for GRC
-
-After training completes:
-
-```cmd
-python export_for_grc.py
-```
-
-This creates:
-- `generator_lpi.pt` — TorchScript model for TX
-- `decoder_lpi.pt` — TorchScript model for RX
-
-**Copy these to your GRC project folder.**
-
----
-
-## 6. Phase 3: Verify Metrics
-
-```cmd
-python test_metrics.py
-```
-
-**Expected Results:**
-
-| Metric | Target | Interpretation |
-|--------|--------|----------------|
-| **KS p-value** | > 0.85 | Cannot reject Gaussian null hypothesis |
-| **Adversary Accuracy** | 48-56% | Near-random detection = undetectable |
-| **BER** | < 1% | Reliable communication |
-
-**If metrics fail:**
-- KS too low → Increase `W_KURT` and `W_VAR` in train script
-- Adversary too high → Increase `W_SPEC` and `W_CYCLO`
-- BER too high → Train longer or increase `W_REC` to 20.0
-
----
-
-## 7. Phase 4: GNU Radio TX/RX
-
-### 7.1 Open Transmitter
-
-1. Open **GNU Radio Companion**
-2. **File → Open** → `grc/tx_lpi_cgan.grc`
-3. **Double-click the Python Block** (`epy_block_0`)
-4. Verify parameter `model_path` points to:
-   ```
-   C:/Users/yasht/Desktop/LPI_CGAN/generator_lpi.pt
-   ```
-5. Press **F5** (Generate), then **F6** (Run)
-
-**TX Chain:**
-```
-File Source → Throttle → Unpack K Bits → Chunks to Symbols (-1,+1)
-→ Stream to Vector (256) → CGAN Generator → Vector to Stream (512)
-→ RRC Filter → Multiply (GLFSR spreader) → USRP Sink
-```
-
-### 7.2 Open Receiver
-
-1. **File → Open** → `grc/rx_lpi_cgan.grc`
-2. **Double-click the Python Block**
-3. Verify parameter `model_path` points to:
-   ```
-   C:/Users/yasht/Desktop/LPI_CGAN/decoder_lpi.pt
-   ```
-4. Press **F5**, then **F6**
-
-**RX Chain:**
-```
-USRP Source → Stream to Vector (512) → CGAN Decoder
-→ Vector to Stream (256) → File Sink + QT GUI Time Sink
-```
-
-### 7.3 Execution Order
-
-**ALWAYS start RX first, then TX.**
-
-1. Start RX flowgraph (green Play button)
-2. Wait 2 seconds
-3. Start TX flowgraph
-4. Let it run for 10-30 seconds
-5. Stop TX, then stop RX
-
-### 7.4 Verify Over-the-Air
-
-Check the recovered file:
-```cmd
-cd C:\Users\yasht\Desktop\LPI_CGAN
-python -c "import numpy as np; d=np.fromfile('recovered_symbols.fc32', dtype=np.complex64); print(f'Recovered {len(d)} symbols')"
-```
-
----
-
-## 8. Phase 5: Web App Interface
-
-### 8.1 Start the Backend
-
-```cmd
-cd C:\Users\yasht\Desktop\LPI_CGAN\webapp
-python app.py
-```
-
-You will see:
-```
-============================================================
-  ShadowComm LPI - Secure Messaging Platform
-  Open browser: http://localhost:5000
-============================================================
-```
-
-### 8.2 Open Browser
-
-Navigate to: **http://localhost:5000**
-
-### 8.3 Web App Features
-
-| Tab | Function |
-|-----|----------|
-| **💬 Secure Chat** | Type messages, see encryption status, send over SDR |
-| **📡 SDR Control** | Change frequency, bandwidth, TX/RX gain, CGAN gain, sample rate |
-| **📊 Spectrum** | Real-time FFT waterfall, peak power, spectral flatness |
-| **🛡️ LPI Metrics** | KS p-value, adversary detection %, BER, EVM, link quality |
-| **⚙️ Settings** | AES passphrase, RS code, CGAN model path, operation mode |
-
-### 8.4 Using the Chat
-
-1. Go to **Settings** tab
-2. Enter your **AES Passphrase** (must match on both TX and RX)
-3. Go to **SDR Control** tab
-4. Set **Center Frequency** (must match on both sides)
-5. Go to **Secure Chat** tab
-6. Type a message and click **📡 Send**
-7. The backend encrypts → RS encodes → CGAN generates → saves waveform
-8. In real deployment, the waveform goes directly to USRP
-
-### 8.5 API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Web UI |
-| `/api/config` | GET/POST | Read/write SDR/crypto config |
-| `/api/send` | POST | Send encrypted message |
-| `/api/receive` | POST | Receive and decrypt message |
-| `/api/metrics` | GET | LPI health metrics |
-
----
-
-## 9. Phase 6: Field Deployment
-
-### 9.1 Hardware Setup
-
-| Component | Recommendation |
-|-----------|---------------|
-| SDR | USRP B210 (USB) or X310 (Ethernet) |
-| Host | Intel i5/i7 laptop or Raspberry Pi 5 |
-| Antenna | TX/RX omnidirectional or directional |
-| Clock | GPSDO for frequency sync (critical!) |
-
-### 9.2 TX/RX Gain Rules for LPI
-
-| Scenario | TX Gain | RX Gain | Why |
-|----------|---------|---------|-----|
-| Urban Stealth | 0-5 dB | 30-40 dB | Signal below noise floor |
-| Open Field | 10-15 dB | 30-40 dB | Longer range, still covert |
-| Emergency | 20-30 dB | 30-40 dB | Reliability over stealth |
-
-### 9.3 Frequency Planning
-
-| Band | Frequency | Use Case |
-|------|-----------|----------|
-| ISM | 2.4 GHz | License-free testing |
-| VHF | 144-148 MHz | Ham radio (with license) |
-| UHF | 430-440 MHz | Ham radio (with license) |
-| Custom | Your licensed freq | Professional deployment |
-
-### 9.4 Packaging for Field Use
-
-**Option A: Windows Laptop**
-```cmd
-pip install pyinstaller
-pyinstaller --onefile --windowed webapp/app.py
-```
-Creates `ShadowComm.exe` — double-click to run.
-
-**Option B: Raspberry Pi 5 Field Terminal**
 ```bash
-# On Pi
-sudo apt install python3-pip libuhd-dev
-pip3 install torch --index-url https://download.pytorch.org/whl/cpu
-pip3 install -r requirements.txt
-python3 webapp/app.py --host 0.0.0.0
-```
-Connect phone to Pi WiFi hotspot, open browser.
-
-**Option C: Docker Container**
-```dockerfile
-FROM python:3.10-slim
-RUN pip install torch numpy scipy flask flask-socketio pycryptodome reedsolo
-COPY . /app
-WORKDIR /app
-CMD ["python", "webapp/app.py"]
+python -m venv .venv
+# Linux/macOS
+source .venv/bin/activate
+# Windows PowerShell: .venv\\Scripts\\Activate.ps1
+python -m pip install --upgrade pip
+# Optional CPU-only PyTorch wheel (install before requirements if desired):
+python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -r requirements.txt
 ```
 
----
+`h5py` is only needed for GOLD HDF5 input. To use RadioML, obtain the dataset from its provider and pass a local path; training does not need to download it automatically.
 
-## 10. Troubleshooting
+## Training and evaluation
 
-| Problem | Cause | Solution |
-|---------|-------|----------|
-| `ModuleNotFoundError: torch` | Wrong Python environment | Use the same Python that runs GRC |
-| `FileNotFoundError: RML2018.01A.pkl` | Dataset not downloaded | Run `dataset_radioml.py` or download manually |
-| Red errors in GRC Python block | Path issue | Use forward slashes `/` in model_path |
-| `U` underruns on USRP | CGAN too slow | Reduce frame_size to 256; use GPU |
-| Recovered symbols all +1 | CGAN output too small | Increase gain_factor to 0.5 |
-| BER > 5% | Model not trained enough | Train for 200 epochs; increase W_REC |
-| KS p-value < 0.5 | Not noise-like enough | Increase W_KURT and W_VAR weights |
-| Adversary accuracy > 70% | Detectable features | Increase W_SPEC and W_CYCLO |
-| Web app won't start | Port 5000 in use | Change port: `socketio.run(app, port=5001)` |
-| USRP not detected | Driver issue | Run `uhd_find_devices`; reinstall UHD |
+### Train the generator/decoder
 
----
+```bash
+python train.py --epochs 200 --n-samples 50000 --batch 64 --out lpi_checkpoint.pt
+```
 
-## 11. Complete File Index
+To resume that checkpoint, set `--resume` and provide a total target epoch count greater than the checkpoint epoch:
 
-| File | Lines | Purpose |
-|------|-------|---------|
-| `models.py` | ~120 | Generator, Discriminator, Decoder architectures |
-| `train.py` | ~180 | Basic AWGN training |
-| `train_radioml.py` | ~220 | RadioML-enhanced training |
-| `dataset_radioml.py` | ~80 | Download & load RML2018.01A |
-| `export_for_grc.py` | ~25 | TorchScript export |
-| `test_metrics.py` | ~150 | KS test, adversary CNN, BER verification |
-| `grc/tx_lpi_cgan.grc` | XML | GNU Radio TX flowgraph |
-| `grc/rx_lpi_cgan.grc` | XML | GNU Radio RX flowgraph |
-| `webapp/app.py` | ~180 | Flask backend with crypto + CGAN |
-| `webapp/templates/index.html` | ~400 | Signal-like web UI |
-| `requirements.txt` | 8 | All Python dependencies |
+```bash
+python train.py --resume --epochs 620 --n-samples 50000 --batch 64 --out lpi_checkpoint.pt
+```
 
----
+Optional real-reference input for the detector only:
 
-## Quick Start (TL;DR)
+```bash
+python train.py --radioml --data /path/to/captures.hdf5 --epochs 200 --out lpi_checkpoint.pt
+# or use a RadioML .pkl path
+python train_radioml.py --data /path/to/RML2018.01A.pkl --epochs 200 --out lpi_checkpoint.pt
+```
 
-```cmd
-:: 1. Install
-cd C:\Users\yasht\Desktop\LPI_CGAN
-pip install -r requirements.txt
+`train_radioml.py` is a wrapper for `train.py --radioml`; despite the historical name, the optional captures are **not discriminator training data**. They are examples for the auxiliary threat-model detector. The generator's reference remains synthetic AWGN. GOLD `.h5`/`.hdf5` loading requires `h5py`.
 
-:: 2. Train
-python train_radioml.py
+### Continue decoder-only training
 
-:: 3. Export
-python export_for_grc.py
+This option preserves the generator waveform distribution while adapting a full-receptive-field decoder:
 
-:: 4. Verify
-python test_metrics.py
+```bash
+python train_decoder_global.py \
+  --input lpi_checkpoint_v3_610.pt \
+  --output lpi_checkpoint_global_decoder.pt \
+  --steps 4000 --batch 64
+```
 
-:: 5. Open GRC, load tx_lpi_cgan.grc and rx_lpi_cgan.grc
+Continue from the saved output with `--resume --steps N`; each invocation starts a fresh optimizer and keeps the best validation-BER weights. It does not update the generator.
 
-:: 6. Start web app
-cd webapp
+### Evaluate and export
+
+```bash
+python test_metrics.py --ckpt lpi_checkpoint.pt --json-out lpi_metrics.json
+python export_for_grc.py --checkpoint lpi_checkpoint.pt
+```
+
+The evaluator uses synthetic samples and tests:
+
+- pooled generated marginals against a standard normal using a KS test;
+- one freshly trained CNN against generated samples and AWGN;
+- a short autocorrelation diagnostic;
+- noiseless direct generator-to-decoder BER.
+
+The export script writes `generator_lpi.pt`, `decoder_lpi.pt`, and `cgan_manifest.json`; the manifest records SHA-256 hashes and validates the exported artifacts at batch sizes 1 and 3. Re-run evaluation and export from the **same checkpoint** so the UI can verify matching hashes.
+
+## Run the web demo
+
+```bash
 python app.py
-:: Open http://localhost:5000
 ```
 
----
+Open `http://127.0.0.1:5000`. Set `PORT` to use another port. The app expects the TorchScript files and report/manifest in the project root by default. Optional environment variables:
 
-## License & Disclaimer
+- `CGAN_GENERATOR`, `CGAN_DECODER` — model paths;
+- `CGAN_METRICS_REPORT` — report path;
+- `SHADOWCOMM_AES_KEY` — demo key override;
+- `SHADOWCOMM_SECRET_KEY` — Flask session secret.
 
-This system is for **educational and authorized research purposes only**. 
-Compliance with local radio regulations is the operator's responsibility.
+The UI can generate IQ locally, download the latest `.npy`, and run an in-memory decode. Frequency/gain values are demo settings only. The API has no authentication; keep it on a trusted machine/network and do not expose it publicly. API endpoints:
 
----
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/` | GET | Demo UI |
+| `/api/config` | GET/POST | Read/update in-memory demo settings; the AES key is never returned |
+| `/api/send` | POST | Encrypt/encode a message and generate IQ; no transmission |
+| `/api/last-waveform` | GET | Download the last generated IQ array (`.npy`) |
+| `/api/receive` | POST | Decode the last array in a simulated model loopback |
+| `/api/metrics` | GET | Hash-matched offline report, or blank metrics if none/mismatched |
 
-**Built by:** yasht  
-**System:** ShadowComm LPI-CGAN v1.0  
-**Components:** AES-128-CTR + RS(255,223) + CGAN + USRP
+## Tests
+
+```bash
+python -m unittest discover -s tests -v
+python -m py_compile app.py train.py train_decoder_global.py test_metrics.py export_for_grc.py
+```
+
+## RF and legal boundary
+
+No over-the-air test was performed for this result. Do not infer safe transmit settings, range, privacy, or LPI from the UI, model metrics, or GNU Radio file presence. Any future RF work must follow local spectrum rules, be authorized, begin with appropriately attenuated conducted testing, and use calibrated instruments and independent capture/detection analysis. The project's `ota_verify.py` is explicitly experimental and is not an LPI verdict.

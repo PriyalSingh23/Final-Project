@@ -1,4 +1,4 @@
-torch --index-url https://download.pytorch.org/whl/cpu
+torch
 numpy
 scipy
 flask
@@ -6,3 +6,5 @@ flask-socketio
 pycryptodome
 reedsolo
 requests
+# Needed when training with GOLD HDF5 captures; AWGN-only training does not use it.
+h5py

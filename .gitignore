@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.google_drive/
+google_drive/

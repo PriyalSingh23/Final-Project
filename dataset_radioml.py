@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
+"""RadioML 2018.01A local-pickle loader.
+
+The optional ``download_radioml`` helper fetches the large upstream file only
+when called explicitly. Training uses a supplied local path; downloads are
+not started automatically.
 """
-RadioML 2018.01A Dataset Loader
-Download: https://www.deepsig.ai/datasets  (RML2018.01A.pkl ~2.5 GB)
-"""
-import os, pickle, numpy as np, requests
+import os, pickle, numpy as np
+
+try:
+    import requests
+except ImportError:  # local pickle loading does not require the downloader
+    requests = None
 
 RADIOML_URL = "https://opendata.deepsig.io/datasets/2018.01/RML2018.01A.pkl"
 
@@ -11,6 +18,8 @@ def download_radioml(save_path="RML2018.01A.pkl"):
     if os.path.exists(save_path):
         print(f"Dataset exists: {save_path}")
         return save_path
+    if requests is None:
+        raise RuntimeError("Downloading RadioML requires requests; install it or provide a local pickle.")
     print(f"Downloading RadioML 2018.01A (~2.5 GB)...")
     response = requests.get(RADIOML_URL, stream=True)
     response.raise_for_status()

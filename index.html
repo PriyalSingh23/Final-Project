@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ShadowComm LPI</title>
+<title>ShadowComm CGAN Offline Demo</title>
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
@@ -218,32 +218,33 @@ body {
     <div class="logo">ShadowComm LPI</div>
     <div class="status-bar">
         <span class="status-dot"></span>
-        <span id="linkStatus">LPI Active | TX: 750kHz</span>
+        <span id="linkStatus">CGAN demo | no SDR link</span>
     </div>
-    <button class="nav-btn active" onclick="showPanel('chat')">💬 Secure Chat</button>
-    <button class="nav-btn" onclick="showPanel('sdr')">📡 SDR Control</button>
+    <button class="nav-btn active" onclick="showPanel('chat')">💬 CGAN Demo</button>
+    <button class="nav-btn" onclick="showPanel('sdr')">📡 SDR Settings</button>
     <button class="nav-btn" onclick="showPanel('spectrum')">📊 Spectrum</button>
-    <button class="nav-btn" onclick="showPanel('metrics')">🛡️ LPI Metrics</button>
+    <button class="nav-btn" onclick="showPanel('metrics')">📊 Offline Metrics</button>
     <button class="nav-btn" onclick="showPanel('settings')">⚙️ Settings</button>
 </div>
 
 <div class="main">
     <div class="header">
-        <h2 id="panelTitle">Secure Chat</h2>
-        <div class="freq-display" id="freqDisplay">750.000 kHz | BW: 32 kHz | Gain: 10 dB</div>
+        <h2 id="panelTitle">CGAN Demo</h2>
+        <div class="freq-display" id="freqDisplay">750.000 kHz | BW: 32 kHz | offline simulation</div>
     </div>
 
     <!-- CHAT PANEL -->
     <div id="panel-chat" class="panel active">
         <div class="chat-area" id="chatArea">
             <div class="message received">
-                System ready. Enter your AES passphrase in Settings to begin secure communication.
+                Offline CGAN demo ready. Generated frames stay in this app; no radio is connected.
                 <div class="meta">System • Now</div>
             </div>
         </div>
         <div class="input-area">
-            <input type="text" id="msgInput" placeholder="Type secure message..." onkeypress="if(event.key==='Enter')sendMsg()">
-            <button onclick="sendMsg()">📡 Send</button>
+            <input type="text" id="msgInput" placeholder="Type a message for the local demo..." onkeypress="if(event.key==='Enter')sendMsg()">
+            <button onclick="sendMsg()">Generate IQ</button>
+            <button onclick="receiveMsg()" style="background:#374151;">Decode loopback</button>
         </div>
     </div>
 
@@ -261,7 +262,7 @@ body {
                 <div class="value" id="bwValue">32 kHz</div>
             </div>
             <div class="control-group">
-                <label>TX Gain (dB) — LPI Mode</label>
+                <label>TX Gain (dB) — demo setting only</label>
                 <input type="range" id="txGainSlider" min="0" max="30" value="10" oninput="updateSDR()">
                 <div class="value" id="txGainValue">10 dB</div>
             </div>
@@ -269,11 +270,6 @@ body {
                 <label>RX Gain (dB)</label>
                 <input type="range" id="rxGainSlider" min="0" max="60" value="30" oninput="updateSDR()">
                 <div class="value" id="rxGainValue">30 dB</div>
-            </div>
-            <div class="control-group">
-                <label>CGAN Gain Factor</label>
-                <input type="range" id="cganGainSlider" min="1" max="100" value="35" oninput="updateSDR()">
-                <div class="value" id="cganGainValue">0.35</div>
             </div>
             <div class="control-group">
                 <label>Sample Rate (Sps)</label>
@@ -287,9 +283,9 @@ body {
                 </select>
             </div>
         </div>
+        <p style="margin-top:16px;color:#f59e0b;font-size:13px;">These values are kept in app memory for the demo; no radio device or RF channel is connected.</p>
         <div style="margin-top:20px;display:flex;gap:10px;">
-            <button onclick="applySDR()" style="background:#10b981;border:none;color:white;padding:12px 32px;border-radius:8px;font-weight:600;cursor:pointer;">🔄 Apply to SDR</button>
-            <button onclick="saveProfile()" style="background:#374151;border:none;color:white;padding:12px 32px;border-radius:8px;font-weight:600;cursor:pointer;">💾 Save Profile</button>
+            <button onclick="applySDR()" style="background:#10b981;border:none;color:white;padding:12px 32px;border-radius:8px;font-weight:600;cursor:pointer;">Apply demo settings</button>
         </div>
     </div>
 
@@ -298,53 +294,42 @@ body {
         <div class="spectrum-container">
             <canvas id="spectrumChart"></canvas>
         </div>
-        <div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap;">
-            <div class="metric-card" style="flex:1;min-width:150px;">
-                <div class="value" id="specPeak">-62.4</div>
-                <div class="label">Peak Power (dB)</div>
-            </div>
-            <div class="metric-card" style="flex:1;min-width:150px;">
-                <div class="value" id="specFlat">0.94</div>
-                <div class="label">Spectral Flatness</div>
-            </div>
-        </div>
+        <p style="margin-top:8px;color:#f59e0b;font-size:12px;">Simulated spectrum data for UI testing — no SDR measurements are connected.</p>
     </div>
 
     <!-- METRICS PANEL -->
     <div id="panel-metrics" class="panel">
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;">
             <div class="metric-card">
-                <div class="value" id="mKS">0.91</div>
+                <div class="value" id="mKS">—</div>
                 <div class="label">KS Test p-value</div>
             </div>
             <div class="metric-card">
-                <div class="value" id="mAdv">52.3%</div>
-                <div class="label">Adversary Detect</div>
+                <div class="value" id="mAdv">—</div>
+                <div class="label">Test CNN accuracy</div>
             </div>
             <div class="metric-card">
-                <div class="value" id="mBER">0.30%</div>
-                <div class="label">Bit Error Rate</div>
+                <div class="value" id="mBER">—</div>
+                <div class="label">Noiseless model BER</div>
             </div>
             <div class="metric-card">
-                <div class="value" id="mEVM">8.1%</div>
-                <div class="label">EVM RMS</div>
+                <div class="value" id="mEVM">—</div>
+                <div class="label">EVM (not measured)</div>
             </div>
             <div class="metric-card">
-                <div class="value" id="mLink">87%</div>
-                <div class="label">Link Quality</div>
+                <div class="value" id="mLink">—</div>
+                <div class="label">Link quality (not measured)</div>
             </div>
             <div class="metric-card">
-                <div class="value" id="mCyclo">0.002</div>
-                <div class="label">Cyclo Feature</div>
+                <div class="value" id="mCyclo">—</div>
+                <div class="label">Autocorrelation ratio</div>
             </div>
         </div>
         <div style="margin-top:24px;padding:16px;background:#111827;border-radius:8px;border:1px solid #1f2937;">
-            <h3 style="color:#10b981;margin-bottom:12px;">🛡️ Threat Assessment</h3>
-            <p style="color:#9ca3af;font-size:14px;line-height:1.6;">
-                Current waveform is <strong style="color:#10b981;">STEALTH</strong>. 
-                KS p-value 0.91 confirms Gaussian distribution. 
-                Adversary CNN accuracy at 52.3% (near-random guessing). 
-                Cyclostationary features suppressed below noise floor.
+            <h3 style="color:#f59e0b;margin-bottom:12px;">Offline validation status</h3>
+            <p id="metricsAssessment" style="color:#9ca3af;font-size:14px;line-height:1.6;">
+                No metrics report loaded. Run <code>python test_metrics.py --ckpt lpi_checkpoint.pt --json-out lpi_metrics.json</code>.
+                Offline synthetic tests are not proof of low-probability-of-intercept performance over the air.
             </p>
         </div>
     </div>
@@ -353,30 +338,22 @@ body {
     <div id="panel-settings" class="panel">
         <div class="sdr-control">
             <div class="control-group">
-                <label>AES-128 Passphrase</label>
-                <input type="password" id="aesKey" value="0123456789abcdef" style="width:100%;padding:10px;background:#1f2937;border:1px solid #374151;color:#e0e6ed;border-radius:4px;">
+                <label>Demo AES key (not production-safe)</label>
+                <input type="password" id="aesKey" placeholder="Leave blank to keep the current server key" autocomplete="new-password" style="width:100%;padding:10px;background:#1f2937;border:1px solid #374151;color:#e0e6ed;border-radius:4px;">
             </div>
             <div class="control-group">
-                <label>RS Code</label>
-                <select id="rsCode" style="width:100%;padding:10px;background:#1f2937;border:1px solid #374151;color:#e0e6ed;border-radius:4px;">
-                    <option value="255,223">RS(255,223)</option>
-                    <option value="255,239">RS(255,239)</option>
-                    <option value="63,47">RS(63,47)</option>
-                </select>
+                <label>Reed–Solomon code</label>
+                <div>Fixed at RS(255,191) in this demo; selectable modes are not implemented.</div>
             </div>
             <div class="control-group">
-                <label>CGAN Model</label>
+                <label>Generator TorchScript path</label>
                 <input type="text" id="modelPath" value="generator_lpi.pt" style="width:100%;padding:10px;background:#1f2937;border:1px solid #374151;color:#e0e6ed;border-radius:4px;">
             </div>
             <div class="control-group">
-                <label>Operation Mode</label>
-                <select style="width:100%;padding:10px;background:#1f2937;border:1px solid #374151;color:#e0e6ed;border-radius:4px;">
-                    <option>Urban Stealth (low power)</option>
-                    <option>Open Field (medium power)</option>
-                    <option>Emergency Burst (high power)</option>
-                    <option>Training Mode (no SDR)</option>
-                </select>
+                <label>Decoder TorchScript path</label>
+                <input type="text" id="decoderPath" value="decoder_lpi.pt" style="width:100%;padding:10px;background:#1f2937;border:1px solid #374151;color:#e0e6ed;border-radius:4px;">
             </div>
+            <p style="color:#f59e0b;font-size:13px;">The built-in AES-CTR/RS path is for local demonstration only; it has no authenticated encryption or per-message nonce.</p>
         </div>
         <button onclick="saveSettings()" style="margin-top:20px;background:#10b981;border:none;color:white;padding:12px 32px;border-radius:8px;font-weight:600;cursor:pointer;">💾 Save Settings</button>
     </div>
@@ -391,24 +368,72 @@ function showPanel(id) {
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('panel-' + id).classList.add('active');
-    event.target.classList.add('active');
-    const titles = {chat:'Secure Chat', sdr:'SDR Control', spectrum:'Spectrum Analyzer', metrics:'LPI Metrics', settings:'Settings'};
+    const activeButton = Array.from(document.querySelectorAll('.nav-btn'))
+        .find(button => button.getAttribute('onclick') === `showPanel('${id}')`);
+    if (activeButton) activeButton.classList.add('active');
+    const titles = {chat:'CGAN Demo', sdr:'Demo Settings', spectrum:'Simulated Data', metrics:'Offline Metrics', settings:'Settings'};
     document.getElementById('panelTitle').textContent = titles[id];
 }
 
-function sendMsg() {
+let lastMessageId = null;
+
+function appendChatMessage(text, kind, meta, href) {
+    const chat = document.getElementById('chatArea');
+    const bubble = document.createElement('div');
+    bubble.className = `message ${kind}`;
+    bubble.appendChild(document.createTextNode(text));
+    const footer = document.createElement('div');
+    footer.className = 'meta';
+    footer.textContent = meta;
+    bubble.appendChild(footer);
+    if (href) {
+        const link = document.createElement('a');
+        link.href = href;
+        link.textContent = 'Download generated IQ frames';
+        link.style.display = 'inline-block';
+        link.style.marginTop = '8px';
+        link.style.color = '#6ee7b7';
+        bubble.appendChild(link);
+    }
+    chat.appendChild(bubble);
+    chat.scrollTop = chat.scrollHeight;
+}
+
+async function sendMsg() {
     const input = document.getElementById('msgInput');
     const text = input.value.trim();
     if (!text) return;
-    const chat = document.getElementById('chatArea');
-    chat.innerHTML += `<div class="message sent">${text}<div class="meta">You • Encrypting → CGAN → Air</div></div>`;
     input.value = '';
-    chat.scrollTop = chat.scrollHeight;
+    appendChatMessage(text, 'sent', 'You • encrypted → CGAN (local simulation)', null);
+    try {
+        const response = await fetch('/api/send', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({message:text})
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || data.status || 'Generation failed');
+        lastMessageId = data.message_id;
+        appendChatMessage(
+            `Generated ${data.frame_count} IQ frame(s); not transmitted over radio.`,
+            'received', `CGAN • ${data.waveform_shape.join(' × ')} float32 samples`, data.waveform_url
+        );
+    } catch (error) {
+        appendChatMessage(`Generation error: ${error.message}`, 'received', 'System', null);
+    }
+}
 
-    fetch('/api/send', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:text})})
-    .then(r => r.json()).then(d => {
-        console.log('TX:', d);
-    });
+async function receiveMsg() {
+    try {
+        const response = await fetch('/api/receive', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({message_id:lastMessageId})
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || data.status || 'Decode failed');
+        appendChatMessage(data.message, 'received', 'CGAN • simulated model loopback (no RF channel)', null);
+    } catch (error) {
+        appendChatMessage(`Decode error: ${error.message}`, 'received', 'System', null);
+    }
 }
 
 function updateSDR() {
@@ -416,7 +441,6 @@ function updateSDR() {
     document.getElementById('bwValue').textContent = document.getElementById('bwSlider').value + ' kHz';
     document.getElementById('txGainValue').textContent = document.getElementById('txGainSlider').value + ' dB';
     document.getElementById('rxGainValue').textContent = document.getElementById('rxGainSlider').value + ' dB';
-    document.getElementById('cganGainValue').textContent = (document.getElementById('cganGainSlider').value / 100).toFixed(2);
 }
 
 function applySDR() {
@@ -425,47 +449,70 @@ function applySDR() {
         bandwidth_hz: parseInt(document.getElementById('bwSlider').value) * 1000,
         tx_gain_db: parseInt(document.getElementById('txGainSlider').value),
         rx_gain_db: parseInt(document.getElementById('rxGainSlider').value),
-        cgan_gain: parseInt(document.getElementById('cganGainSlider').value) / 100,
         sample_rate: parseInt(document.getElementById('sampRate').value)
     };
     fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(config)})
-    .then(r => r.json()).then(d => alert('SDR settings applied'));
+    .then(async response => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Could not update demo settings');
+        alert('Demo values updated in server memory only; no SDR is connected.');
+    })
+    .catch(error => alert(error.message));
 }
 
 function saveSettings() {
     const config = {
-        aes_key: document.getElementById('aesKey').value,
-        model_path_gen: document.getElementById('modelPath').value
+        model_path_gen: document.getElementById('modelPath').value,
+        model_path_dec: document.getElementById('decoderPath').value
     };
+    const key = document.getElementById('aesKey').value;
+    if (key) config.aes_key = key;
     fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(config)})
-    .then(r => r.json()).then(d => alert('Settings saved'));
+    .then(async response => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Could not save settings');
+        document.getElementById('aesKey').value = '';
+        alert('Demo settings saved in server memory. The cryptographic path is not production-safe.');
+    })
+    .catch(error => alert(error.message));
 }
-
-function saveProfile() { alert('Profile saved to config.json'); }
 
 // Spectrum chart
 const ctx = document.getElementById('spectrumChart').getContext('2d');
 const spectrumChart = new Chart(ctx, {
     type: 'line',
-    data: { labels: Array.from({length:512},(_,i)=>i), datasets: [{ label:'Power (dB)', data:Array(512).fill(-80), borderColor:'#10b981', borderWidth:1, pointRadius:0, fill:true, backgroundColor:'rgba(16,185,129,0.1)' }] },
+    data: { labels: Array.from({length:512},(_,i)=>i), datasets: [{ label:'Simulated magnitude (dB)', data:Array(512).fill(-80), borderColor:'#10b981', borderWidth:1, pointRadius:0, fill:true, backgroundColor:'rgba(16,185,129,0.1)' }] },
     options: { responsive:true, maintainAspectRatio:false, animation:false, scales:{ x:{display:false}, y:{min:-100,max:-30,grid:{color:'#1f2937'},ticks:{color:'#6b7280'}} }, plugins:{legend:{display:false}} }
 });
 
 function updateSpectrum(data) {
     spectrumChart.data.datasets[0].data = data.map(v => 20*Math.log10(Math.abs(v)+1e-10));
     spectrumChart.update('none');
-    document.getElementById('specPeak').textContent = Math.max(...data).toFixed(1);
 }
 
-// Poll metrics
+// Poll model health and only display metrics that have actually been measured.
+const metricValue = (value, digits=2) => Number.isFinite(value) ? value.toFixed(digits) : '—';
 setInterval(() => {
     fetch('/api/metrics').then(r => r.json()).then(m => {
-        document.getElementById('mKS').textContent = m.ks_pvalue.toFixed(2);
-        document.getElementById('mAdv').textContent = m.adversary_accuracy.toFixed(1) + '%';
-        document.getElementById('mBER').textContent = (m.ber*100).toFixed(2) + '%';
-        document.getElementById('mEVM').textContent = m.evm.toFixed(1) + '%';
-        document.getElementById('mLink').textContent = m.link_quality + '%';
-    });
+        document.getElementById('mKS').textContent = metricValue(m.ks_pvalue);
+        document.getElementById('mAdv').textContent = Number.isFinite(m.adversary_accuracy) ? `${metricValue(m.adversary_accuracy, 1)}%` : '—';
+        document.getElementById('mBER').textContent = Number.isFinite(m.ber) ? `${metricValue(m.ber * 100)}%` : '—';
+        document.getElementById('mEVM').textContent = metricValue(m.evm);
+        document.getElementById('mLink').textContent = metricValue(m.link_quality);
+        document.getElementById('mCyclo').textContent = metricValue(m.cyclo_ratio);
+        document.getElementById('linkStatus').textContent = m.generator_loaded
+            ? 'CGAN ready | offline simulation'
+            : 'CGAN model unavailable';
+        const assessment = document.getElementById('metricsAssessment');
+        if (m.measurement_status === 'offline_report_loaded') {
+            const outcome = m.report_passed === true ? 'Offline checks passed.' : 'One or more offline checks failed.';
+            assessment.textContent = `${outcome} Report: ${m.report_checkpoint || 'unknown checkpoint'}; ${m.measurement_scope}. This is not an OTA/LPI guarantee.`;
+        } else if (m.measurement_status === 'stale_report') {
+            assessment.textContent = m.measurement_scope;
+        } else {
+            assessment.textContent = 'No metrics report loaded. Run python test_metrics.py --ckpt lpi_checkpoint.pt --json-out lpi_metrics.json. Offline synthetic tests are not proof of low-probability-of-intercept performance over the air.';
+        }
+    }).catch(error => console.warn('Metrics unavailable:', error));
     socket.emit('spectrum_request');
 }, 1000);
 </script>

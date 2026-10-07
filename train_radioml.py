@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""LPI-CGAN Training with RadioML 2018.01A Dataset
+"""Compatibility wrapper for ``python train.py --radioml``.
 
-The old standalone RadioML trainer was merged into train.py --radioml.
-This wrapper exists so existing habits/scripts keep working:
+The optional GOLD HDF5 or RadioML pickle is used only as additional
+real-signal examples for the threat-model detector. It does not replace the
+generator's synthetic AWGN spectral reference and does not establish RF or
+LPI performance. Provide a dataset with ``--data PATH``; this wrapper does
+not download one automatically.
 
-    python train_radioml.py            ==  python train.py --radioml
-
-RadioML mixing: set RADIOML_PATH below (or place RML2018.01A.pkl in this
-directory). The mixed AWGN + real-modulated reference signals make the
-threat-model detector stronger, which usually improves metric 3.
+Example:
+    python train_radioml.py --data /path/to/captures.hdf5
 """
 import sys
 import train
 
-if __name__ == '__main__':
-    sys.argv = [sys.argv[0], '--radioml'] + sys.argv[1:]
+if __name__ == "__main__":
+    sys.argv = [sys.argv[0], "--radioml", *sys.argv[1:]]
     train.main()

@@ -1,25 +1,16 @@
 #!/usr/bin/env python3
-"""Over-the-air verification for the LPI-CGAN field test.
+"""Experimental known-message diagnostic for a captured complex-IQ file.
 
-Reads the RAW baseband captured by rx_lpi_cgan.grc (rx_raw.fc32), estimates:
-  - CFO            (from the TX carrier-leakage line -- present in any real
-                    USRP capture; falls back to a decoder grid search if the
-                    line is absent)
-  - constant phase (LO phase at capture start; decoder tolerance ~15 deg)
-  - frame offset   (RX vector boundary vs TX frame boundary, 0..511 samples)
-then reports:
-  1. Best (offset, CFO, phase)
-  2. BER of the full capture vs the known message (test_message.txt),
-     decoded in chunks with per-chunk CFO/phase tracking (phase rotates
-     linearly, so long captures need re-anchoring every ~250 frames)
-  3. KS test of received (normalized, phase-corrected) frames vs N(0,1) --
-     the real over-the-air LPI verdict: does the radiated signal look AWGN?
+This script attempts frame/CFO/phase alignment and decodes against a known
+message. It assumes the capture contains this project's frame format and a
+sufficiently stable channel. It has not been validated as a general SDR
+receiver, and its output is NOT a covertness, security, or LPI verdict. No
+RF test is implied by running it on synthetic or unrelated data.
 
-Search metric: HARD-BIT agreement with the known message at the best
-circular shift (computed by FFT correlation of +-1 hard bits against the
-+-1 message). Soft-LLR correlation was tried and rejected: misaligned frames
-decode to systematic biased bits that correlate almost as well as correct
-frames, and +/-4-sample offsets stay bit-consistent with the message.
+The reported BER is a diagnostic against the supplied known payload. The
+fitted-normal KS statistic is exploratory only; its p-value is not reported
+because the normal parameters are estimated from the same capture. Use
+independent calibrated measurements and multiple detectors for RF research.
 
 Usage:
   python ota_verify.py --raw rx_raw.fc32 --msg test_message.txt
@@ -257,12 +248,13 @@ ber, off, cfo, phi, total_bits, flat = results[0]
 print(f"[ota] winner: offset={off} cfo={cfo:+.3f} Hz phase={np.rad2deg(phi):.1f} deg BER={ber*100:.2f}%")
 
 mu, sd = flat.mean(), flat.std()
-ks_stat, ks_p = stats.kstest(flat, 'norm', args=(mu, sd))
+ks_stat = stats.kstest(flat, 'norm', args=(mu, sd)).statistic
 
-print("\n" + "=" * 60)
-print("OVER-THE-AIR VERIFICATION REPORT")
-print("=" * 60)
+print("\n" + "=" * 64)
+print("EXPERIMENTAL CAPTURE DIAGNOSTIC — NOT AN LPI VERDICT")
+print("=" * 64)
 print(f"frames decoded : {total_bits // 256} (offset {off}, CFO {cfo:+.3f} Hz, phase {np.rad2deg(phi):.1f} deg)")
-print(f"BIT ERROR RATE : {ber*100:.2f}%  {'PASS' if ber < 0.01 else 'FAIL'} (target < 1%)")
-print(f"KS vs N(0,1)   : p={ks_p:.4f}  {'PASS' if ks_p > 0.05 else 'FAIL'} (target > 0.05) | mean={mu:.4f} std={sd:.4f}")
-print("=" * 60)
+print(f"known-message BER: {ber*100:.2f}% (diagnostic only; channel/test assumptions apply)")
+print(f"fitted-normal KS statistic: D={ks_stat:.6f} | mean={mu:.4f} std={sd:.4f} (no p-value; parameters fitted on this capture)")
+print("This output does not establish covertness, security, or radio-link performance.")
+print("=" * 64)

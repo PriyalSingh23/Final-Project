@@ -174,6 +174,32 @@ class Decoder(nn.Module):
         return (self.forward(x) > 0.5).float()
 
 
+class GlobalDecoder(nn.Module):
+    """Fully-connected decoder with global access to every IQ sample.
+
+    The convolutional Decoder has a short local receptive field. This variant
+    is useful for decoder-only retraining when the trained generator spreads
+    each message bit across the complete 2x512 waveform.
+    """
+    def __init__(self, msg_len=256):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Flatten(start_dim=1),
+            nn.Linear(2 * 512, 1024),
+            nn.LeakyReLU(0.2),
+            nn.Linear(1024, 512),
+            nn.LeakyReLU(0.2),
+            nn.Linear(512, msg_len),
+        )
+        self.apply(_init_linear)
+
+    def forward(self, x):
+        return torch.sigmoid(self.net(x))
+
+    def hard_bits(self, x):
+        return (self.forward(x) > 0.5).float()
+
+
 # ---------------------------------------------------------------------------
 # Training loop (Wasserstein + decoder joint training)
 # ---------------------------------------------------------------------------

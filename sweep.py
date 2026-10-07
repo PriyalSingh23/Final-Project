@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Train/test sweep: resumes training in chunks, runs the full test battery
-after each chunk, and logs all four metrics to a CSV. When a snapshot passes
-every metric, it is saved as <ckpt>.best.pt and the sweep stops.
+"""Offline train/test sweep: resume in chunks and record synthetic metrics.
+A snapshot is saved as <ckpt>.best.pt when the configured KS, one-CNN
+adversary, and noiseless BER screens pass; autocorrelation is diagnostic.
+This stopping rule is not RF or LPI validation.
 
 Usage (your PC, runs by itself) -- pass the GOLD data dir via --data, e.g.
     python sweep.py --ckpt lpi_checkpoint_v2_607.pt --max-epoch 680 --n-samples 50000
@@ -17,9 +18,11 @@ def current_epoch(ckpt):
     import torch
     return torch.load(ckpt, map_location='cpu', weights_only=False)['epoch']
 
-def run_chunk(ckpt, target_epoch, n_samples, data):
+def run_chunk(ckpt, target_epoch, n_samples, data, radioml=False):
     cmd = [PY, 'train.py', '--out', ckpt, '--resume',
-           '--epochs', str(target_epoch), '--n-samples', str(n_samples), '--radioml']
+           '--epochs', str(target_epoch), '--n-samples', str(n_samples)]
+    if radioml or data:
+        cmd.append('--radioml')
     if data:
         cmd += ['--data', data]
     print(f"[sweep] training to epoch {target_epoch} ...", flush=True)
@@ -42,7 +45,10 @@ def main():
     ap.add_argument('--chunk', type=int, default=2)
     ap.add_argument('--max-epoch', type=int, default=680)
     ap.add_argument('--n-samples', type=int, default=50000)
-    ap.add_argument('--data', default=None)
+    ap.add_argument('--data', default=None,
+                    help='GOLD .hdf5 or RadioML .pkl; enables real-signal mixing')
+    ap.add_argument('--radioml', action='store_true',
+                    help='enable real-signal mixing (falls back to AWGN when no dataset is found)')
     ap.add_argument('--log', default=None)
     ap.add_argument('--once', action='store_true', help='single chunk then exit')
     args = ap.parse_args()
@@ -61,7 +67,8 @@ def main():
             import shutil
             shutil.copy(args.ckpt, args.ckpt + '.prev.pt')   # collapse guard
             t0 = time.time()
-            run_chunk(args.ckpt, min(ep + args.chunk, args.max_epoch), args.n_samples, args.data)
+            run_chunk(args.ckpt, min(ep + args.chunk, args.max_epoch),
+                      args.n_samples, args.data, radioml=args.radioml)
             ep = current_epoch(args.ckpt)
             row = run_tests(args.ckpt)
             row['epoch'] = ep
