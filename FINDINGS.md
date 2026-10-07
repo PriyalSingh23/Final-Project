@@ -209,6 +209,14 @@ detectors that could tell it apart, not merely against a scalar KS test.
   checks the numbers *and* the digest, so a mirror that is not a mirror fails the build.
   (No published metric changed: `lpi_eval.py`, `rx_usrp.py` and the v4 flowgraphs all load
   `run/lpi_v4.best.pt` itself -- the stale pair could only have bitten a custom block.)
+* **A gate that measures the training budget, not the code, is worse than no gate.**
+  `ci.yml` used to assert `ks>0.05` on its 6-epoch/12-step smoke model; it went green on
+  one commit and red on the next with no functional change (the trainer gained one
+  `torch.randn`-consuming export call, which shifted which epoch became "best"). CI now
+  asks only whether the receive chain works (`ber_field<1%` + `capture_decodes`) and
+  prints the stealth numbers as artefacts; stealth regression is the nightly's job, where
+  the model is actually converged. If a threshold is straddled at the budget you can
+  afford to test with, report it, do not gate on it.
 * **Documentation is an interface, so it gets a test.** `lpi_v4/check_docs.py` parses every
   command line in the READMEs, the field checklist, `v4.bat`, the workflows, the notebook
   *and* the scripts' own docstrings/`print` hints, resolves each named script, and checks

@@ -47,9 +47,13 @@ become either a flag on one of those five commands or a step in CI.
 
 * **`.github/workflows/ci.yml`** (every push/PR touching `lpi_v4/`, `tests/`,
   `colab/`): installs CPU torch, runs `pytest -m "not slow"` on
-  ubuntu+windows, then a 6-epoch training run and `lpi_eval` as a **metric gate**
-  (it fails the build if the field BER, the message FER, the capture decode or
-  KS p regress). Artefacts: the epoch CSV, the log, `ci_eval.md`. That 6-epoch run
+  ubuntu+windows, then a 6-epoch training run and `lpi_eval` as a **link gate**: the
+  build fails if the field BER or the capture decode regress, while the stealth
+  numbers (KS p, EW, adversary, FER) are printed and archived but not gated -- an
+  unconverged model crosses those thresholds by luck, and a flaky gate is worse than
+  none (measured: `ks>0.05` passed and failed on consecutive commits at this budget).
+  Stealth belongs to the nightly, which trains 40 epochs and compares to
+  `metrics/last.json`. Artefacts: the epoch CSV, the log, `ci_eval.md`. That 6-epoch run
   passes `--no-fail` — a 6-epoch model's *own* warden has barely been
   trained, so `lpi_eval`'s full-gate verdict is meaningless there; the step's
   explicit hard subset is what fails the build. Its train also uses
