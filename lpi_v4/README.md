@@ -54,8 +54,15 @@ python lpi_train.py --epochs 45 --steps 24 --batch 48 \
 # GPU / Colab:  --epochs 200 --steps 60 --batch 96
 # with real captures as hard negatives:  --radioml --data GOLD_XYZ_OSC.0001_1024.hdf5
 python lpi_eval.py --ckpt run/lpi_v4.best.pt --frames 512 --snrs 0,2,4,6,8,10 \
-    --n-msg 16 --fit-warden 400 --md run/eval.md --out-json run/eval.json
+    --n-msg 64 --fit-warden 400 --md run/eval.md --out-json run/eval.json \
+    --latex run/eval.tex
 ```
+
+`--latex` writes the paper's two metric tables from the run itself (balanced
+environments, no packages assumed, `yes`/`no` rather than `\checkmark`), with the command
+line that produced them in a comment -- which is the only way the manuscript and the
+measurement stay in agreement. `lpi_v4/lpi_latex.py` is standalone and tested against a
+saved `--out-json`, so you can also re-render tables from an old run.
 
 The epoch row printed by the trainer *is* the gate: `bce` (decodability), `link`
 (BER through the field synchroniser), `adv` (warden balanced accuracy), `KS p /
@@ -76,7 +83,7 @@ see `../FINDINGS.md` §1.
 ## Measured (CPU, this repo, `run/lpi_v4.best.pt`)
 
 Every number below is from one command, run on the shipped checkpoint:
-`lpi_eval.py --frames 512 --snrs 0,2,4,6,8,10 --n-msg 16 --fit-warden 400`
+`lpi_eval.py --frames 512 --snrs 0,2,4,6,8,10 --n-msg 64 --fit-warden 400`
 (gate band `--gate-snr-min 5`, i.e. the SNR the acceptance line is claimed at).
 
 | | target | measured |
@@ -87,8 +94,20 @@ Every number below is from one command, run on the shipped checkpoint:
 | composite `Sc` | <0.20 | **0.1399** (8/8 domains pass) |
 | adversary, held-out fitted detector | 48–56 % | **55.90 %**, AUC 0.5858 |
 | field BER (sync + CFO + phase noise + DC + IQ) | <1 % | 3.05e-5 @6 dB · **0.0** @8,10 dB · 2.14e-3 @2 dB · 1.00e-2 @0 dB |
-| message FER (CRC-8 + RS + AES), 16 msgs/SNR | — | **0 %** for every SNR ≥ 2 dB; 25 % @0 dB |
+| message FER (CRC-8 + RS + AES), 64 texts/SNR | <5 % in band | **0 %** at every SNR ≥ 2 dB; 18.8 % @0 dB |
+| 95 % upper bounds (worst in-band point) | ≤ target | **BER ≤ 9.6e-5** (65,536 bits), **FER ≤ 4.6 %** (64 texts) |
 | `lpi_eval.py` exit code | 0 | **0** (6/6 gate checks PASS) |
+
+The bound row is the honest version of the two rows above it. A point estimate of 0 %
+only says what the sample excluded, so `lpi_eval` computes the one-sided
+Clopper--Pearson upper bound for every in-band point and marks a check `n/a` when the
+bound does not clear the target. The sequence, all measured on this checkpoint with a
+clean in-band run: 4 texts -> bound 52.7 % (proves nothing), 16 -> 17.1 %, 32 -> 8.9 %
+(still short of 5 %), **64 -> 4.6 %**, which is why `--n-msg 64` is the recommended
+command and not a stylistic choice. `cp_n_needed()` in `lpi_eval.py` is that arithmetic
+in reverse -- 59 texts for the FER line, 299 bits for the BER line -- and the JSON
+carries both as `texts_needed` / `bits_needed` next to the bounds, so the sample size a
+claim needs travels with the claim.
 
 Two things that are easy to get wrong when quoting this table, both measured:
 

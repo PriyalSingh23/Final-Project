@@ -400,3 +400,77 @@ def test_exporting_does_not_disturb_the_training_stream(tmp_path):
     after = [float(v) for v in torch.randn(8)]
     assert ref == after, f"the export consumed RNG: {ref[:3]} != {after[:3]}"
     assert (tmp_path / "export_manifest.json").exists(), "export must record its source"
+
+
+def test_cp_upper_bound_is_exact_where_it_can_be():
+    """The bound is what a zero-error row actually claims, so it had better be right."""
+    from lpi_eval import cp_upper
+
+    for n in (4, 96, 4096):                       # k = 0 is the exact closed form
+        assert abs(cp_upper(0, n) - (1.0 - 0.05 ** (1.0 / n))) < 1e-12
+    assert cp_upper(0, 96) < 0.05 < cp_upper(0, 4)   # why --n-msg exists
+    assert cp_upper(10, 10) == 1.0
+    assert cp_upper(-3, 5) == cp_upper(0, 5) and cp_upper(99, 5) == 1.0
+    from lpi_eval import cp_n_needed
+    # the sample a "< x" claim needs, with zero failures -- quoted in the READMEs
+    assert cp_n_needed(0.05) == 59 and cp_n_needed(0.01) == 299
+    assert cp_upper(0, cp_n_needed(0.05)) <= 0.05 + 1e-12       # the two agree
+    assert cp_upper(0, cp_n_needed(0.05) - 1) > 0.05            # and it is tight
+    ks = [cp_upper(k, 1000) for k in range(40)]
+    assert all(a <= b + 1e-12 for a, b in zip(ks, ks[1:])), "must be monotone in k"
+    assert all(0.0 <= v <= 1.0 for v in ks)
+    assert cp_upper(2, 65536) < 1e-4
+
+
+def _sample_rep():
+    """A report dict in the shape lpi_eval writes -- built from the committed
+    metrics/last.json so these formatters are exercised without a model."""
+    import json
+
+    rep = json.load(open(os.path.join(ROOT, "metrics", "last.json")))
+    rep["block_message"] = {"6.0": {"ber": 0.0, "fer": 0.0, "msgs_ok": 16, "n": 16}}
+    row = rep["block_link"]["6.0"] if "6.0" in rep["block_link"] else \
+        rep["block_link"][next(iter(rep["block_link"]))]
+    row["n_bits_tested"] = 65536
+    row["field_ci95"] = 7.2e-5
+    row["fer_ci95"] = 0.031
+    return rep
+
+
+def test_latex_fragment_is_valid_latex_structurally():
+    """No TeX in the sandbox, so check what actually breaks: balanced environments
+    and one ``&`` per declared column -- plus graceful degradation on a JSON that
+    predates the CI columns."""
+    import json
+    import re
+
+    import lpi_latex
+
+    cfg = LPIConfig()
+    tex = lpi_latex.latex_tables(_sample_rep(), cfg, "lpi_eval.py --n-msg 16")
+    begins = re.findall(r"\\begin\{(\w+\*?)\}", tex)
+    ends = re.findall(r"\\end\{(\w+\*?)\}", tex)
+    assert sorted(begins) == sorted(ends) and begins, (begins, ends)
+    for spec, cols in re.findall(r"\\begin\{tabular\}@\{\}(l+c+)@\{\}", tex):
+        width = len(cols)
+        for line in tex.splitlines():
+            if line.rstrip().endswith("\\\\") and "&" in line:
+                n = line.count("&") + 1
+                assert n == width, f"{n} cells in a {width}-column row: {line}"
+    assert "tab:lpi-stealth" in tex and "tab:lpi-link" in tex
+    assert "-0.0048" in tex or "-0.005" in tex                  # signed formatting
+    assert "0.8646" in tex                                       # value, not the key
+    # an older report without the bound columns still renders (falls back to the point)
+    old = json.loads(json.dumps(_sample_rep()))
+    for r in old["block_link"].values():
+        r.pop("field_ci95", None)
+    assert "7.20e-05" in lpi_latex.latex_tables(_sample_rep(), cfg)
+
+
+def test_md_report_renders_from_a_saved_json():
+    import lpi_eval
+
+    md = lpi_eval.md_report(_sample_rep(), LPIConfig())
+    assert md.startswith("## ShadowComm LPI v4")
+    for col in ("95 %", "ks_p", "SNR"):
+        assert col in md, col

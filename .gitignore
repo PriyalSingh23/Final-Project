@@ -10,6 +10,7 @@ lpi_v4/run/*
 !lpi_v4/run/lpi_v4.csv
 !lpi_v4/run/eval.json
 !lpi_v4/run/eval.md
+!lpi_v4/run/eval.tex
 *.npz
 *.cs16
 *.fc32

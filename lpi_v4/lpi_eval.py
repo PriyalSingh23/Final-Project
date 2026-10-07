@@ -41,9 +41,34 @@ from lpi_core import (LPIConfig, LPIGenerator, LPIDecoder, LockNotFound, Warden,
                       load_config, make_preamble, receiver_front_end,
                       strip_preamble, sync_and_correct, unit_power)
 from lpi_crypto import FrameCodec
+from lpi_latex import latex_tables
 from lpi_stats import ew_report
 
 GATE = {"adv": 56.0, "ks": 0.05, "ber_field": 0.01, "fer": 0.05}
+
+
+def cp_upper(k: int, n: int, alpha: float = 0.05) -> float:
+    """One-sided Clopper-Pearson upper bound on a binomial rate (k failures in n).
+
+    Every "0 errors" row in this report is a point estimate over a finite sample, and
+    a reviewer is entitled to ask what the sample actually *excludes*: 0 failures in
+    96 texts bounds the rate at 3.1 %, which supports "< 5 %"; the same 0 in 4 texts
+    bounds it at 52 %, which supports nothing.  k = 0 is the exact closed form
+    1 - alpha**(1/n); scipy gives the general case, with a normal-approximation
+    fallback so the report still works where scipy is absent.
+    """
+    n = max(int(n), 1)
+    k = min(max(int(k), 0), n)
+    if k == 0:
+        return 1.0 - alpha ** (1.0 / n)
+    if k == n:
+        return 1.0
+    try:
+        from scipy import stats
+        return float(stats.beta.ppf(1.0 - alpha, k + 1, n - k))
+    except Exception:                                # normal approx, one-sided 95 %
+        p = k / n
+        return min(1.0, p + 1.6449 * (max(p * (1.0 - p), 1e-12) / n) ** 0.5)
 
 
 # ------------------------------------------------------------------ model ----
@@ -147,6 +172,18 @@ def fit_warden(gen, cfg, device, n_train=2600, n_test=1000, steps=400, ch=32, lr
             "state": {k: v.cpu() for k, v in W1.state_dict().items()}}
 
 
+def cp_n_needed(target: float, alpha: float = 0.05) -> int:
+    """Samples required before "rate < target" is *supported*, assuming zero failures.
+
+    From 1 - alpha**(1/n) <= target.  So 59 texts with none lost is the cheapest way
+    to say "message FER < 5 %"; 20 bits is not, no matter how many zeros it shows.
+    """
+    import math
+
+    target = min(max(float(target), 1e-9), 1.0 - 1e-9)
+    return int(math.ceil(math.log(alpha) / math.log(1.0 - target)))
+
+
 def block_stealth(gen, dec, wd, cfg, device, n=4096, fit_steps=0):
     x, _ = gen_frames(gen, cfg, n, device, seed=1)
     with torch.no_grad():
@@ -220,14 +257,21 @@ def block_link(gen, dec, cfg, device, snrs, n=512, key="SESSION-KEY"):
                     "dropped_frames": -1, "note": str(e)[:60]}
             frames = np.zeros((0, 2, cfg.frame_len), np.float32)
         if frames.shape[0] == 0:
-            rows[snr] = dict(mf=mf_ber, graph=g_ber, field=1.0, fer=1.0, **info)
+            rows[snr] = dict(mf=mf_ber, graph=g_ber, field=1.0, fer=1.0,
+                            n_bits_tested=0, n_frames_tested=0,
+                            field_ci95=1.0, fer_ci95=1.0, **info)
             continue
         got = frames_to_bits(dec, frames[:n], device)
         f_ber = float((got != bits[: got.size]).mean())
         nf = got.size // cfg.n_bits
         ref = bits.reshape(-1, cfg.n_bits)[: nf]
         fer = float((got.reshape(nf, cfg.n_bits) != ref).any(1).mean())
-        rows[snr] = dict(mf=mf_ber, graph=g_ber, field=f_ber, fer=fer, **info)
+        nbits_t = int(got.size)
+        nfrm = max(int(nf), 1)
+        rows[snr] = dict(mf=mf_ber, graph=g_ber, field=f_ber, fer=fer,
+                         n_bits_tested=nbits_t, n_frames_tested=nfrm,
+                         field_ci95=cp_upper(int(round(f_ber * nbits_t)), nbits_t),
+                         fer_ci95=cp_upper(int(round(fer * nfrm)), nfrm), **info)
         print(f"[link] {snr:5.1f} dB | MF {mf_ber:.2e} | in-graph {g_ber:.2e} | "
               f"field {f_ber:.2e} (FER {fer:.1%}) | offset {info['offset']} "
               f"CFO {info['cfo_hz']:+.1f} Hz pilot-SNR {info['pilot_snr_db']:.1f} dB "
@@ -301,6 +345,9 @@ def block_message(gen, dec, cfg, device, snrs, key, n_msg=8, mode="ctr"):
             ok_txt += int(back == m and good)
         fer = nfer / len(msgs)
         out[snr] = dict(fer=fer, ber=(nbits_e / nbits_t if nbits_t else 1.0),
+                        ber_ci95=cp_upper(nbits_e, nbits_t),
+                        fer_ci95=cp_upper(nfer, len(msgs)),
+                        n_bits_tested=int(nbits_t),
                         msgs_ok=ok_txt, n=len(msgs), **info)
         print(f"[msg] {snr:5.1f} dB | BER {nbits_t and nbits_e/nbits_t:.2e} | FER {fer:6.1%} "
               f"| exact messages {ok_txt}/{len(msgs)} | dropped {info['dropped_frames']}")
@@ -421,6 +468,9 @@ def main():
     ap.add_argument("--out-json", default="run/eval.json")
     ap.add_argument("--md", default="",
                     help="also write a human-readable Markdown report here")
+    ap.add_argument("--latex", default="",
+                    help="write the paper's metric tables (LaTeX) here, straight from "
+                         "this run -- no hand-retyped numbers")
     ap.add_argument("--no-fail", action="store_true",
                     help="always exit 0: print the gate but never fail the caller "
                          "(use in CI when a short run is not expected to pass it, and "
@@ -486,9 +536,26 @@ def main():
         vacuous["capture_decodes"] = ("capture was synthesized here, so it tests the "
                                       "codec/framing, not the radio front end")
     nmsg = max(int(r.get("n", 0)) for r in ms.values())
-    if nmsg * len(ms) < 64:
-        vacuous["fer<5%"] = (f"only {nmsg} messages per SNR: FER resolves "
-                             f"{100.0 / nmsg:.0f} % steps, far coarser than 5 %")
+    # What the *sample* supports, as opposed to what the point estimate suggests.
+    ber_ci = max(float(r.get("field_ci95", r["field"])) for r in band.values())
+    fer_ci = max(float(r.get("fer_ci95", r["fer"])) for r in fer_band.values())
+    nb = int(sum(r.get("n_bits_tested", 0) for r in band.values()))
+    nt = int(sum(int(r.get("n", 0)) for r in fer_band.values()))
+    nper = max(int(r.get("n", 0)) for r in fer_band.values())
+    nbp = max(int(r.get("n_bits_tested", 0)) for r in band.values())
+    rep["ci95"] = {"ber_field_upper": ber_ci, "fer_upper": fer_ci,
+                   "points_in_band": len(band), "n_bits_total": nb, "n_texts_total": nt,
+                   "bits_per_point": nbp,
+                   "texts_per_point": nper,
+                   "texts_needed": cp_n_needed(GATE["fer"]),
+                   "bits_needed": cp_n_needed(GATE["ber_field"])}
+    if checks["fer<5%"] and fer_ci > GATE["fer"]:
+        vacuous["fer<5%"] = (f"{nper} texts per point bounds a clean run at "
+                             f"{fer_ci:.1%} (> {GATE['fer']:.0%}); {rep['ci95']['texts_needed']} "
+                             "with none lost is what it takes to state the target")
+    if checks["ber_field<1%"] and ber_ci > GATE["ber_field"]:
+        vacuous["ber_field<1%"] = (f"{nbp:,} bits per point bound field BER at "
+                                   f"{ber_ci:.1e} (> {GATE['ber_field']:.0e}); raise --frames")
     rep["gate_vacuous"] = vacuous
     print("\n================= FIELD GATE =================")
     for k, v in checks.items():
@@ -496,6 +563,11 @@ def main():
               + (f"   (n/a: {vacuous[k]})" if k in vacuous else ""))
     print("  worst-field:", f"BER {worst['field']:.2e} @{worst_snr:g} dB",
           "| worst-FER", f"{fer:.1%} over {nmsg} msgs/SNR", "|", rep["gate_note"])
+    ok_ci = ber_ci <= GATE["ber_field"] and fer_ci <= GATE["fer"]
+    print(f"  95 % upper bounds, worst of {len(band)} in-band point(s) "
+          f"({nbp:,} bits, {nper} texts each): BER <= {ber_ci:.1e}, "
+          f"FER <= {fer_ci:.1%} -- "
+          + ("support the targets" if ok_ci else "do NOT support the targets"))
     if strict_snr != worst_snr:
         print(f"  (full sweep, not gated: worst BER {ln[strict_snr]['field']:.2e} "
               f"@{strict_snr:g} dB, FER {max(r['fer'] for r in ms.values()):.1%})")
@@ -510,6 +582,13 @@ def main():
         with open(args.md, "w") as f:
             f.write(md_report(rep, cfg))
         print(f"[eval] wrote {args.md}")
+    if args.latex:
+        proto = (f"lpi_eval.py --ckpt {args.ckpt} --frames {args.frames} "
+                 f"--snrs {args.snrs} --n-msg {args.n_msg} --fit-warden {args.fit_warden} "
+                 f"--gate-snr-min {args.gate_snr_min}")
+        with open(args.latex, "w") as f:
+            f.write(latex_tables(rep, cfg, proto))
+        print(f"[eval] wrote {args.latex}")
     if args.no_fail:
         print("[eval] --no-fail: exit 0 regardless of the gate")
         return 0
@@ -530,23 +609,32 @@ def md_report(rep, cfg):
     if "fit_steps" in st:
         L.append(f"| adv protocol | fresh CNN detector, {st['fit_steps']} steps on "
                  f"2600 train / 1000 held-out frames (disjoint pools) |")
-    L += ["", "### Link (per-bit BER)", "| SNR | MF | in-graph | field | FER |",
-          "|---|---|---|---|---|"]
+    L += ["", "### Link (per-bit BER)",
+          "| SNR | MF | in-graph | field | field 95 % \u2264 | FER | FER 95 % \u2264 | bits |",
+          "|---|---|---|---|---|---|---|---|"]
     for s, r in ln.items():
-        L.append(f"| {s:g} | {r['mf']:.2e} | {r['graph']:.2e} | {r['field']:.2e} | "
-                 f"{r['fer']:.1%} |")
-    L += ["", "### Message layer (CRC-8 + RS(42,34) + AES)", "| SNR | BER | FER | msgs ok |",
-          "|---|---|---|---|"]
+        # s is a float in-process but a *string* when the report came back from JSON,
+        # so :g on it directly breaks any attempt to re-render a saved run
+        L.append(f"| {float(s):g} | {r['mf']:.2e} | {r['graph']:.2e} | {r['field']:.2e} | "
+                 f"{r.get('field_ci95', r['field']):.2e} | {r['fer']:.1%} | "
+                 f"{r.get('fer_ci95', r['fer']):.1%} | {r.get('n_bits_tested', 0):,} |")
+    L += ["", "### Message layer (CRC-8 + RS(42,34) + AES)",
+          "| SNR | BER | BER 95 % \u2264 | FER | FER 95 % \u2264 | msgs ok |",
+          "|---|---|---|---|---|---|"]
     for s, r in ms.items():
-        L.append(f"| {s:g} | {r['ber']:.2e} | {r['fer']:.1%} | {r['msgs_ok']}/{r['n']} |")
+        L.append(f"| {float(s):g} | {r['ber']:.2e} | {r.get('ber_ci95', r['ber']):.2e} | "
+                 f"{r['fer']:.1%} | {r.get('fer_ci95', r['fer']):.1%} | "
+                 f"{r['msgs_ok']}/{r['n']} |")
     L += ["", "### Gate", ""]
     if rep.get("gate_note"):
         L.append(f"*{rep['gate_note']}*  ")
-    for k, v in rep["gate"].items():
+    for k, v in rep.get("gate", {}).items():
         note = rep.get("gate_vacuous", {}).get(k)
         L.append(f"- [{'x' if v else ' '}] {k}" + (f" -- *not measured*: {note}" if note else ""))
     L.append("")
-    L.append(f"**overall: {'ALL TARGETS MET' if rep['all_pass'] else 'NOT YET PASSING'}**")
+    # a saved --out-json may predate all_pass, so fall back to deriving the verdict
+    verdict = rep.get("all_pass", all(rep.get("gate", {}).values()))
+    L.append(f"**overall: {'ALL TARGETS MET' if verdict else 'NOT YET PASSING'}**")
     return "\n".join(L)
 
 

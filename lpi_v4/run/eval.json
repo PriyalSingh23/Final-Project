@@ -1,14 +1,4 @@
 {
- "source": "python lpi_v4/lpi_eval.py --ckpt run/lpi_v4.best.pt --frames 512 --snrs 0,2,4,6,8,10 --n-msg 64 --fit-warden 400 --gate-snr-min 5",
- "date": "2026-10-07",
- "protocol": {
-  "frames": 512,
-  "n_msg_per_snr": 64,
-  "fit_warden_steps": 400,
-  "gate_snr_min_db": 5.0,
-  "device": "cpu",
-  "ci": "one-sided 95% Clopper-Pearson per in-band point"
- },
  "block_stealth": {
   "ks_p": 0.8645853400230408,
   "kurt": 2.9906842708587646,
@@ -231,17 +221,24 @@
    "pilot_snr_db": 27.84962747277655
   }
  },
- "gate": {
-  "adv_in_50s": true,
-  "ks>0.05": true,
-  "ew>=7/8": true,
-  "ber_field<1%": true,
-  "fer<5%": true,
-  "capture_decodes": true
+ "block_capture": {
+  "found": 512,
+  "ber": 1.52587890625e-05,
+  "sync_s": 0.0672246469998754,
+  "offset": 76,
+  "start_sample": 1228,
+  "cfo_hz": -39.49359860916454,
+  "coarse_hz": 0.0,
+  "n_frames": 512,
+  "dropped_frames": 4,
+  "pilot_snr_db": 23.88699552686395
  },
- "gate_vacuous": {
-  "capture_decodes": "capture was synthesized here, so it tests the codec/framing, not the radio front end"
- },
+ "gate_band_db": [
+  5.0,
+  10.0
+ ],
+ "gate_worst_snr_db": 6.0,
+ "gate_note": "ber/fer = worst over SNR >= 5 dB (3 of 6 sweep points)",
  "ci95": {
   "ber_field_upper": 9.60630384031878e-05,
   "fer_upper": 0.045729702330762456,
@@ -252,5 +249,17 @@
   "texts_per_point": 64,
   "texts_needed": 59,
   "bits_needed": 299
- }
+ },
+ "gate_vacuous": {
+  "capture_decodes": "capture was synthesized here, so it tests the codec/framing, not the radio front end"
+ },
+ "gate": {
+  "adv_in_50s": true,
+  "ks>0.05": true,
+  "ew>=7/8": true,
+  "ber_field<1%": true,
+  "fer<5%": true,
+  "capture_decodes": true
+ },
+ "all_pass": true
 }

@@ -119,6 +119,36 @@ invisible as the detector you tried" means in practice. Both numbers are in
 `run/eval.json`-style output now (`fit_steps` is recorded next to `fit_adv_acc`), so a
 reviewer can see which claim came from which budget instead of picking the flattering one.
 
+### Trying to buy the adversary band with `loss_cov` (a measured dead end)
+
+`loss_cov` was the one term that ever moved `adv`, so the obvious experiment was to
+double it: `--epochs 45 --steps 24 --batch 48 --eps 0.10 --w-cov 3.0` at the shipped
+seed (only the weight differs), 45 epochs, best snapshot at epoch 36. Decision rule was
+fixed *before* measuring: promote only if the adversary lands in 48--56 % at **both**
+400 and 800 fitting steps while KS p and `Sc` stay at or better than the shipped model.
+
+| | shipped (`--w-cov 2.0`) | `--w-cov 3.0` |
+|---|---|---|
+| KS p | 0.8646 | **0.0131** |
+| composite `Sc` | 0.1399 | 0.3263 |
+| domains passed | 8/8 | 7/8 (circularity 0.0107 → 0.0130·10 = 0.1303) |
+| adversary, held-out | 55.90 % / 58.80 % | 56.70 % / 58.20 % |
+| field BER @ 6 dB | 3.05e-5 | 6.10e-5 |
+
+The rule says no, and the shape of the failure is the lesson: more weight on one
+statistical term traded away the headline metric for ~1 point of adversary margin, and
+did not even fix the 800-step reading. It joins `--w-adv 1.5` as a dead end, written here
+so the next person does not spend a training budget on it. Nothing about the worse
+checkpoint is committed -- `run/*` scratch is gitignored -- but the row above is
+reproducible with the command quoted, and the shipped `run/lpi_v4.best.pt` stands.
+
+**A rate of 1e-5 is two bit errors, so quote the bound, not the point.** The same
+`--w-cov 3.0` checkpoint measured field BER at 6 dB as 6.10e-5 with `--fit-warden 400`
+and 3.05e-5 with `--fit-warden 800` -- the fitting pass consumes global RNG, so the
+channel realisation differs, i.e. one or two flipped bits out of 65,536. `lpi_eval.py`
+now reports the one-sided 95 % Clopper--Pearson bound per in-band SNR (`field_ci95`,
+`fer_ci95`) and refuses to let a claim it cannot support read as a pass.
+
 ## 5. What the statistical losses are actually for
 
 Measured with a **completely untrained** generator (random weights, 512 frames):
@@ -237,8 +267,11 @@ detectors that could tell it apart, not merely against a scalar KS test.
 ## 8. Current state of every acceptance metric
 
 One command produced this column, on the shipped checkpoint, on CPU:
-`lpi_eval.py --ckpt run/lpi_v4.best.pt --frames 512 --snrs 0,2,4,6,8,10 --n-msg 16
---fit-warden 400` (gate band `--gate-snr-min 5` dB). Quote it together with the
+`lpi_eval.py --ckpt run/lpi_v4.best.pt --frames 512 --snrs 0,2,4,6,8,10 --n-msg 64
+--fit-warden 400` (gate band `--gate-snr-min 5` dB). `--n-msg 64` is not decoration: at
+16 texts per SNR a clean in-band point only bounds FER at 8.9 %, i.e. the run could not
+have supported the `< 5 %` line however well it went; 64 with none lost bounds it at
+4.6 %, which does. Quote it together with the
 numbers: KS p and FER move with `--frames`/`--n-msg`, and the adversary moves with
 `--fit-warden`, so a number without its protocol is not reproducible.
 
@@ -256,7 +289,7 @@ numbers: KS p and FER move with `--frames`/`--n-msg`, and the adversary moves wi
 | adversary accuracy | 48–56 % | 55.90 % (400 fit steps), AUC 0.5858 — **58.80 %** / AUC 0.6164 at 800 steps | PASS at the paper's detector budget, *missed* at 2× it (§4) |
 | BER, cable | < 1 % | 0.0 at 8/10 dB, 3.05e-5 at 6 dB, 2.14e-3 at 2 dB; 1.00e-2 at 0 dB | PASS for every SNR ≥ 2 dB (0 dB is below the claimed operating point) |
 | BER, antenna | < 5 % | field path (5 impairments) 2.44e-4 at 4 dB, 0.0 at ≥8 dB | PASS (to be confirmed on hardware) |
-| message FER (CRC+RS+AES) | — | 0 % at every SNR ≥ 2 dB (16 msgs/SNR = 96 texts, all exact); 25 % at 0 dB | PASS |
+| message FER (CRC+RS+AES) | < 5 % | 0 % at every SNR ≥ 2 dB (64 texts each, all exact); 95 % upper bound **4.6 %**; 18.8 % at 0 dB | PASS, and the sample supports it |
 | cyclostationary ratio | ≈ 1× | 1.013 | PASS |
 
 Not yet demonstrated (needs the bench, not the sandbox): live UHD streaming at
