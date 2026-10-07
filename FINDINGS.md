@@ -217,6 +217,14 @@ detectors that could tell it apart, not merely against a scalar KS test.
   prints the stealth numbers as artefacts; stealth regression is the nightly's job, where
   the model is actually converged. If a threshold is straddled at the budget you can
   afford to test with, report it, do not gate on it.
+* **A traced module can bake in the example input's shape.** `export_for_grc` traces at
+  batch 2 (`torch.jit.trace` warns that a `size_prods == 1` comparison became a constant,
+  which is exactly this risk) while the GRC blocks call the decoder at batch 1. Measured: the
+  exported decoder is bitwise identical to the eager one at batch 1, 2, 8 and 32 (max
+  |Δ| = 0.0), and the generator returns unit-power `(B, 2, 512)` at all four -- no batch
+  assumption leaked in. `test_exported_torchscript_matches_the_checkpoint` covers batch 1 for
+  that reason; `check_trace=False` on its own cannot tell you.
+
 * **Documentation is an interface, so it gets a test.** `lpi_v4/check_docs.py` parses every
   command line in the READMEs, the field checklist, `v4.bat`, the workflows, the notebook
   *and* the scripts' own docstrings/`print` hints, resolves each named script, and checks

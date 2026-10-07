@@ -452,6 +452,22 @@ def export_for_grc(ckpt: str, device: str = "cpu", outdir: str | None = None) ->
     """TorchScript export for the GNU Radio Python blocks / the USRP scripts."""
     outdir = outdir or os.path.dirname(os.path.abspath(ckpt))
     os.makedirs(outdir, exist_ok=True)
+    # This runs *inside* the epoch loop, on every improvement, and tracing needs
+    # dummy tensors -> torch.randn.  Left alone, that quietly advances the global
+    # RNG and changes which samples the next epoch draws: adding a print() to the
+    # exporter would then alter the trained model.  It is why a CI smoke run crossed
+    # its own KS threshold between two commits (FINDINGS.md), so the stream is
+    # saved and restored around the whole export.
+    rng = (torch.get_rng_state(), np.random.get_state(), random.getstate())
+    try:
+        return _export_for_grc(ckpt, device, outdir)
+    finally:
+        torch.set_rng_state(rng[0])       # a ByteTensor, not a tuple: index it once
+        np.random.set_state(rng[1])
+        random.setstate(rng[2])
+
+
+def _export_for_grc(ckpt: str, device: str, outdir: str | None) -> None:
     ck = torch.load(ckpt, map_location=device, weights_only=False)
     cfg = LPIConfig(**{k: (tuple(v) if k == "snr_range" else v)
                        for k, v in ck.get("cfg", {}).items()})

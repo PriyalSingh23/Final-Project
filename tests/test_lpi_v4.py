@@ -336,14 +336,19 @@ def test_exported_torchscript_matches_the_checkpoint():
     G.load_state_dict(ck["generator"], strict=False)
     D.load_state_dict(ck["decoder"], strict=False)
 
-    torch.manual_seed(0)
-    y = torch.randn(8, 2, cfg.frame_len)
-    with torch.no_grad():
-        eager = D(y)
-        script = torch.jit.load(dec_pt).eval()(y)
-    assert tuple(eager.shape) == tuple(script.shape), (eager.shape, script.shape)
-    assert torch.allclose(eager, script, atol=1e-4, rtol=1e-4), \
-        f"exported decoder drifts from the checkpoint: {(eager - script).abs().max():.2e}"
+    # Batch 1 first: that is the shape the GRC blocks call with, while the trace was
+    # made at batch 2.  A baked-in batch assumption would show up here and nowhere
+    # else -- and `torch.jit.trace` warns about exactly that (size_prods -> const).
+    dec_script = torch.jit.load(dec_pt).eval()
+    for B in (1, 8):
+        torch.manual_seed(0)
+        y = torch.randn(B, 2, cfg.frame_len)
+        with torch.no_grad():
+            eager, script = D(y), dec_script(y)
+        assert tuple(eager.shape) == tuple(script.shape), (eager.shape, script.shape)
+        assert torch.allclose(eager, script, atol=1e-4, rtol=1e-4), (
+            f"exported decoder drifts from the checkpoint at batch {B}: "
+            f"{(eager - script).abs().max():.2e}")
 
     # The generator draws fresh masking noise on every call -- that IS the design --
     # so it can only be checked for shape/energy, never bitwise (check_trace=False).
@@ -375,3 +380,23 @@ def test_exported_torchscript_matches_the_checkpoint():
     assert exported == ck["cfg"], {
         k: (exported.get(k), ck["cfg"].get(k))
         for k in set(exported) | set(ck["cfg"]) if exported.get(k) != ck["cfg"].get(k)}
+
+
+@pytest.mark.skipif(not HAVE_CKPT, reason="no trained checkpoint")
+def test_exporting_does_not_disturb_the_training_stream(tmp_path):
+    """``export_for_grc()`` runs inside the epoch loop, so it must be RNG-neutral.
+
+    Tracing needs dummy tensors, i.e. torch.randn; unguarded, every export shifted
+    the global stream and the *next* epoch drew different data.  Which means the
+    number of best-epoch exports -- a printing detail -- decided the model, and a
+    CI job flipped its own metric verdict between two commits because of it.
+    """
+    import lpi_train
+
+    torch.manual_seed(7); np.random.seed(7)
+    ref = [float(v) for v in torch.randn(8)]
+    torch.manual_seed(7); np.random.seed(7)
+    lpi_train.export_for_grc(CKPT, "cpu", str(tmp_path))
+    after = [float(v) for v in torch.randn(8)]
+    assert ref == after, f"the export consumed RNG: {ref[:3]} != {after[:3]}"
+    assert (tmp_path / "export_manifest.json").exists(), "export must record its source"
