@@ -1,0 +1,116 @@
+# lpi_v4 — the working ShadowComm LPI stack
+
+Everything needed to (a) train the covert waveform, (b) prove it meets the metric
+targets, and (c) put it on a USRP. Five modules, no GNU Radio dependency, no GPU
+dependency:
+
+```
+lpi_core.py     config + generator + decoder + warden + channel + frame sync
+lpi_stats.py    the 8-domain EW battery (Table 4 of the paper) + composite loss
+lpi_crypto.py   payload layer: CRC-8 -> RS(42,34) -> AES-128-CTR/GCM -> bits
+lpi_datasets.py GOLD / RadioML2016 loader for "hard negative" real captures
+lpi_train.py    the trainer (composite objective, per-epoch gate, auto-export)
+lpi_eval.py     the gate: stealth + per-SNR BER + message FER + capture decode
+tx_usrp.py      real-time transmit         rx_usrp.py   real-time receive + decode
+uhd_io.py       version-tolerant UHD wrapper (send/recv, sc16 packing)
+lpi_grc.py      the two GNU Radio blocks (pure python, testable without GR)
+make_grc.py     regenerates tx_lpi_v4.grc / rx_lpi_v4.grc from lpi_grc.py
+make_bits_file.py  writes the coded .dat that the GRC transmitter reads
+v4.bat          Windows entry point for all of the above
+run/            checkpoints, per-epoch CSV, eval reports, exported TorchScript
+```
+
+**One source of truth for the physics.** `LPIConfig` defines frame length, pilot
+length, bits/frame, sample rate and ε; `sync_and_correct` is *the* receiver
+synchroniser used by the trainer's link metric, the evaluator, the USRP scripts
+and the GRC block. That is deliberate: the v1–v3 "512 vs 1024 sample frame"
+disaster was possible only because two files each had their own idea.
+
+## 5 minutes, no radio
+
+```bash
+python -m pytest ../tests -q -m "not slow"      # framing + sync + crypto loopback
+python lpi_train.py --epochs 12 --steps 24 --batch 48 --out run/smoke.pt
+python lpi_eval.py --ckpt run/smoke.best.pt --frames 128 --snrs 2,5,8
+python rx_usrp.py --selftest                    # TX -> channel -> RX -> text
+python lpi_grc.py                               # the GRC blocks, without GRC
+```
+
+`lpi_eval.py` exits non-zero unless the whole gate passes, so it is usable in CI.
+
+## Train for the paper numbers
+
+```bash
+python lpi_train.py --epochs 45 --steps 24 --batch 48 \
+    --eps 0.10 --w-cov 0.5 --w-adv 1.5 --d-stop-frac 0.55 \
+    --out run/lpi_v4.pt --log run/lpi_v4.csv
+# GPU / Colab:  --epochs 200 --steps 60 --batch 96
+# with real captures as hard negatives:  --radioml --data GOLD_XYZ_OSC.0001_1024.hdf5
+python lpi_eval.py --ckpt run/lpi_v4.best.pt --frames 512 --snrs 0,2,4,6,8,10 \
+    --fit-warden 800 --md run/eval.md --out-json run/eval.json
+```
+
+The epoch row printed by the trainer *is* the gate: `bce` (decodability), `link`
+(BER through the field synchroniser), `adv` (warden balanced accuracy), `KS p /
+kurt / H / circ` (noise-likeness), `EW n/8` (how many of the eight domains pass),
+`Sc` (the composite distance to AWGN).
+
+Knobs, in the order they matter: `--eps` (masking fraction — the single
+stealth↔BER trade), `--w-rec`, `--w-adv`, `--d-stop-frac` (when the wardens get
+frozen), `--w-cov` (the covariance/Gram term), `--frame-len`/`--n-bits`
+(processing gain). Do not add a payload phase scramble, do not blend dither
+against an un-normalised signal, and do not use a conjugate-mirrored preamble —
+see `../FINDINGS.md` §1.
+
+## Measured (CPU, this repo, `run/lpi_v4.best.pt`)
+
+| | target | measured |
+|---|---|---|
+| KS p (IQ vs AWGN) | > 0.05 (want > 0.85) | **0.865** |
+| kurtosis / entropy / circularity | 3.0 / >0.95 / <0.15 | 2.991 / 0.957 / 0.011 |
+| PAPR dev / SCF / C42 / WVD | <3 dB / <3 / <0.3 / <3.7 | +0.01 dB / 1.013 / −0.005 / 1.017 |
+| composite `Sc` | <0.20 | **0.140** (8/8 domains) |
+| adversary, held-out fitted detector | 48–56 % | **55.9 %**, AUC 0.586 |
+| field BER (sync + CFO + phase noise + DC + IQ) | <1 % cable | **0.0** at 5 dB, 1.9e-3 at 2 dB |
+| message FER (CRC-8 + RS + AES), 4 msgs | — | **0 %** at 5 dB and at 2 dB |
+
+Reproduce with the two commands above; the definitions of each number (and the
+two conventions that change them by 25 points if you get them wrong — label
+inversion, disjoint pools) are in `../FINDINGS.md` §4.
+
+## USRP
+
+```bash
+# TX box
+python tx_usrp.py --addr 192.168.10.2 --freq 2.484e9 --rate 245760 --gain 0 \
+                  --text "ALPHA-INDIA-001" --bursts 20 --loop --period 0.2
+# RX box
+python rx_usrp.py --addr 192.168.10.1 --freq 2.484e9 --rate 245760 --gain 30 \
+                  --watch --json-out rx_log.jsonl
+# no radio / no network: write it, read it
+python tx_usrp.py --file tx.npz --text "hello" && python rx_usrp.py --capture tx.npz
+```
+
+Rate: a B210 cannot go below ~208 kS/s, so **32 kS/s in the old checklist is not
+reachable** — the stack defaults to 245760 S/s (61.44 MHz / 250, exact integer
+decimation, no fractional clock error). The LPI margin comes from the waveform
+(9.03 dB processing gain, 128 bits per 2.34 ms frame), not from a slow sample
+rate. A frame is `512 payload + 64 pilot` samples; one AES/RS burst is 3 frames.
+
+If the receiver prints `NO LOCK`, it is one of exactly four things — frequency,
+sample rate, gain, key — and the printed `pilot-SNR` / `CFO` / `dropped` fields
+tell you which. A residual LO offset up to ±6 kHz is found automatically by the
+two-pass `coarse_acquisition` (see `../FINDINGS.md` §3); `--coarse 20000` widens
+it, `--coarse off` disables it.
+
+## GNU Radio
+
+Open `tx_lpi_v4.grc` / `rx_lpi_v4.grc` in GRC. Each embeds one small Python block
+that only delegates to `lpi_grc.py`; the `lpi_dir` variable must point at this
+folder. Before touching the GUI, run `python lpi_grc.py` — it drives the same two
+blocks through a synthetic channel and prints the recovered text, so a broken
+flowgraph is visibly *not* a broken PHY. After editing the embedded sources,
+regenerate the files: `python make_grc.py`.
+
+Payload bits for the GUI transmitter come from the crypto layer, not from the
+flowgraph: `python make_bits_file.py --text "..." --bursts 8 --out /tmp/lpi_bits.dat`.

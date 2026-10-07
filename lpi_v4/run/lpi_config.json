@@ -1,0 +1,23 @@
+{
+  "n_bits": 128,
+  "frame_len": 512,
+  "pilot_len": 64,
+  "z_dim": 64,
+  "dither_eps": 0.1,
+  "refine_gain": 0.2,
+  "ch": 32,
+  "fs": 245760.0,
+  "center_freq": 2484000000.0,
+  "snr_range": [
+    -2.0,
+    12.0
+  ],
+  "eval_snr": 5.0,
+  "cfo_max": 150.0,
+  "phase_noise": 0.05,
+  "dc_offset": 0.02,
+  "timing_refine": 2,
+  "iq_amp_db": 0.5,
+  "iq_phase_deg": 1.5,
+  "timing_jitter": 0
+}

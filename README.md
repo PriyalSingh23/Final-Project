@@ -5,6 +5,43 @@
 
 ---
 
+## ⚡ START HERE: the v4 stack (`lpi_v4/`) is the working one
+
+The legacy root scripts (`models.py`, `train.py`, `test_metrics.py`, `sweep.py`)
+implement the v1–v3 waveform that sits on a ~2.7 % BER floor. `lpi_v4/` is the
+rewrite that reaches every target, and it is self-contained: five modules, the
+USRP scripts, the GNU Radio blocks, the evaluator and the tests.
+
+```bat
+lpi_v44.bat test                      :: loopback + framing tests, no GPU/radio
+lpi_v44.bat train  --epochs 45        :: ~9 min on 2 CPU cores, ~25 min on a T4
+lpi_v44.bat eval                       :: the field-gate report (exit 0 == all PASS)
+lpi_v44.bat loop                       :: TX -> channel -> RX -> AES/RS -> text
+lpi_v44.bat tx --text "ALPHA-INDIA-001" --bursts 20
+lpi_v44.bat rx --watch --gain 30
+```
+
+| metric (gate) | target | v4 measured |
+|---|---|---|
+| KS p, IQ vs AWGN | > 0.05 (want > 0.85) | **0.865** |
+| 8-domain EW battery | all pass | **8/8**, composite Sc **0.140** |
+| adversary accuracy | 48–56 % | **55.9 %** held-out, AUC 0.586 |
+| BER, cable | < 1 % | **0.0** at 5 dB (1.9e-3 at 2 dB) |
+| message FER (CRC-8 + RS(42,34) + AES) | — | **0 %** at 5 dB and at 2 dB |
+| cyclostationary / SCF ratio | ≈ 1× | 1.013 |
+| kurtosis / entropy / circularity | 3.0 / >0.95 / <0.15 | 2.991 / 0.957 / 0.011 |
+
+Read next: **`lpi_v4/README.md`** (commands, knobs, USRP + GRC), **`FINDINGS.md`**
+(why v1–v3 could not reach these numbers, and the six silent bugs that had to die
+first), **`AUTOMATION.md`** (Colab ⇄ Actions ⇄ bench automation),
+**`colab/LPI_v4_Colab_Training.ipynb`** (paste-and-run training in Colab).
+
+Two corrections to the older text below: a B210 cannot sample at 32 kS/s (its
+floor is ≈208 kS/s, so v4 uses 245760 S/s), and the framing code is RS(42,34)
+with a `nsize=42` codec — RS(255,223) does not fit a 42-byte codeword.
+
+---
+
 ## Table of Contents
 
 1. [What You Are Building](#1-what-you-are-building)

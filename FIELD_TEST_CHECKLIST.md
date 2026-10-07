@@ -1,5 +1,30 @@
 # LPI-CGAN Field-Test Checklist (One Page)
 
+## >>> v4 (`lpi_v4/`) is the current stack — use the checklist in `lpi_v4/README.md`
+
+Radio: 2.484 GHz, **245760 S/s** (a B210 cannot do 32 kS/s; its floor is ~208 kS/s).
+Frame = 512 payload + 64 keyed-Zadoff-Chu pilot samples = 2.34 ms, 128 bits, 9.03 dB
+processing gain. One AES/RS burst = 3 frames = 7.0 ms.
+
+```bat
+C:\Users\yasht\radioconda\python.exe lpi_v4\v4.bat loop
+C:\Users\yasht\radioconda\python.exe lpi_v4\v4.bat eval
+:: cable loopback (>= 20 dB attenuator between TX/RX and RX2):
+C:\Users\yasht\radioconda\python.exe lpi_v4\tx_usrp.py --text "ALPHA-INDIA-001" --bursts 20 --loop --period 0.2 --rate 245760 --gain 0
+C:\Users\yasht\radioconda\python.exe lpi_v4\rx_usrp.py --watch --seconds 0.25 --gain 30 --rate 245760 --json-out rx_log.jsonl
+:: antennas: same, raise tx_gain 0 -> 20, expect pilot-SNR > 15 dB
+```
+
+Expected on every capture: `frames > 0`, `pilot-SNR > 12 dB`, `bursts N crc N/N OK`,
+`CFO` within +-6 kHz (found automatically), text matching exactly. Pass criteria are
+unchanged (BER < 1 % cable, < 5 % antenna, KS p > 0.05, adversary 48-56 %) and v4
+meets them in simulation -- see the table in `lpi_v4/README.md`. What to *record* from
+`rx_log.jsonl`: `pilot_snr_db`, `cfo_hz`, `dropped_frames`, `crc_ok` vs distance/gain.
+
+---
+
+## (legacy v1-v3 checklist, kept for the older flowgraphs)
+
 Project folder: `C:\Users\yasht\Desktop\LPI_CGAN` | Python: `C:\Users\yasht\radioconda\python.exe`
 Radio: one USRP, TX = TX/RX port, RX = RX2 port (B210 full-duplex), 750 MHz, 32 kS/s.
 
