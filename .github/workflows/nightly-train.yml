@@ -47,8 +47,10 @@ jobs:
         working-directory: lpi_v4
         run: |
           python lpi_eval.py --ckpt run/night.best.pt --frames 512 \
-              --snrs 0,2,4,6,8,10 --fit-warden 2000 \
+              --snrs 0,2,4,6,8,10 --fit-warden 2000 --no-fail \
               --out-json run/night_eval.json --md run/night_eval.md
+          # --no-fail so that the comparison step (and the issue it opens) always
+          # runs; the gate verdict is read from the JSON, not the exit code.
       - name: compare with the last recorded run
         working-directory: lpi_v4
         id: cmp

@@ -408,7 +408,10 @@ def main():
                          "is unambiguous to +/-(fs/2/frame_period); larger offsets are "
                          "handled by rx_usrp.py --coarse, not by this benchmark)")
     ap.add_argument("--out-json", default="run/eval.json")
-    ap.add_argument("--md", default="", help="also write a markdown report (PR comment)")
+    ap.add_argument("--no-fail", action="store_true",
+                    help="always exit 0: print the gate but never fail the caller "
+                         "(use in CI when a short run is not expected to pass it, and "
+                         "in Colab so a failing metric does not kill the cell)")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -463,6 +466,9 @@ def main():
         with open(args.md, "w") as f:
             f.write(md_report(rep, cfg))
         print(f"[eval] wrote {args.md}")
+    if args.no_fail:
+        print("[eval] --no-fail: exit 0 regardless of the gate")
+        return 0
     return 0 if rep["all_pass"] else 1
 
 
