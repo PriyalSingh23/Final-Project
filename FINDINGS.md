@@ -88,6 +88,23 @@ Two conventions matter more than any hyper-parameter:
    number, not a memorisation one. `run/warden_fitted.pt` is saved so the exact
    detector can be re-scored by a reviewer.
 
+What does *not* work, measured: raising the adversarial pressure. A 30-epoch
+run at `--w-adv 1.5 --d-stop-frac 0.55 --eps 0.10` (vs the shipped model's
+`--w-adv 1.0 --eps 0.10`) behaved like this:
+
+| epochs | `adv` | KS p | `Sc` |
+|---|---|---|---|
+| 5–12 | 50–55 % | 0.80 → 0.999 | 0.127–0.138 |
+| 13–24 (wardens still training) | 57 → 74 % | 0.02–0.47 | 0.16–0.29 |
+| 26–34 (wardens frozen) | 65 → 72 % | 0.00–0.31 | 0.19–0.29 |
+
+i.e. once the generator is optimised hard against *one particular* discriminator,
+it distorts the samples to confuse that net, and the eight-domain battery
+punishes it for it. The statistical losses, not the adversarial weight, are what
+hold Gaussianity; the adversarial term only needs to be enough to stop the
+warden from *winning*. (Same reason the trainer now refuses to pick a "best"
+checkpoint from epochs where the warden was never trained.)
+
 The GAN's *own* discriminator is a different animal: it co-adapts with the
 generator, so `adv` in `run/*.csv` swings with the epoch (50 % at epoch 3, 84 %
 by epoch 41 in one run). v4 therefore freezes the wardens after `--d-stop-frac`

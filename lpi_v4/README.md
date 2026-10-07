@@ -42,8 +42,7 @@ python lpi_grc.py                               # the GRC blocks, without GRC
 
 ```bash
 python lpi_train.py --epochs 45 --steps 24 --batch 48 \
-    --eps 0.10 --w-cov 0.5 --w-adv 1.5 --d-stop-frac 0.55 \
-    --out run/lpi_v4.pt --log run/lpi_v4.csv
+    --eps 0.10 --out run/lpi_v4.pt --log run/lpi_v4.csv
 # GPU / Colab:  --epochs 200 --steps 60 --batch 96
 # with real captures as hard negatives:  --radioml --data GOLD_XYZ_OSC.0001_1024.hdf5
 python lpi_eval.py --ckpt run/lpi_v4.best.pt --frames 512 --snrs 0,2,4,6,8,10 \
@@ -56,9 +55,13 @@ kurt / H / circ` (noise-likeness), `EW n/8` (how many of the eight domains pass)
 `Sc` (the composite distance to AWGN).
 
 Knobs, in the order they matter: `--eps` (masking fraction — the single
-stealth↔BER trade), `--w-rec`, `--w-adv`, `--d-stop-frac` (when the wardens get
-frozen), `--w-cov` (the covariance/Gram term), `--frame-len`/`--n-bits`
-(processing gain). Do not add a payload phase scramble, do not blend dither
+stealth↔BER trade), `--w-rec`, `--w-cov` (the covariance/Gram term),
+`--frame-len`/`--n-bits` (processing gain), `--d-stop-frac` (when the wardens get
+frozen). `--w-adv` is deliberately left at 1.0: a measured 30-epoch run with
+`--w-adv 1.5 --d-stop-frac 0.55` drove KS p from 0.87 down to 0.10–0.30 and left
+the warden at 65–72 % — over-fitting *one* discriminator warps the samples without
+buying stealth (see `../FINDINGS.md` §4). If the adversary is your failing metric,
+add statistical pressure (`--w-stat`, `--w-cov`) before adversarial pressure. Do not add a payload phase scramble, do not blend dither
 against an un-normalised signal, and do not use a conjugate-mirrored preamble —
 see `../FINDINGS.md` §1.
 
