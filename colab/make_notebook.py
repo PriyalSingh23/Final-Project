@@ -124,7 +124,9 @@ md("## Export for the radio, and zip it to Drive",
 
 code("import zipfile, glob, os\n"
      "# The trainer already wrote generator_lpi.pt / decoder_lpi.pt / lpi_config.json next to\n"
-     "# every new best checkpoint.  Re-export on demand with:\n"
+     "# every new best checkpoint, plus export_manifest.json naming the checkpoint (with its\n"
+     "# sha256) those files mirror -- check it before wiring a GNU Radio block to them.\n"
+     "# Re-export on demand with:\n"
      "!PYTHONPATH=. python -c \"import sys; sys.path.insert(0,'.'); from lpi_train import export_for_grc; export_for_grc('{CKPT}','cpu','{RUN}')\"\n"
      "files = sorted(glob.glob(RUN + '/*'))\n"
      "print('in Drive:', [os.path.basename(f) for f in files if os.path.isfile(f)])\n"

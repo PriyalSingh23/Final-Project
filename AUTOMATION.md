@@ -13,8 +13,9 @@ those.
 | task | command | notes |
 |---|---|---|
 | unit + loopback tests (~40 s, no GPU, no radio) | `python -m pytest tests -q -m "not slow"` | CI runs the same file on Linux **and** Windows |
-| train | `python lpi_v4/lpi_train.py --epochs 45 --steps 24 --batch 48` | saves every epoch; `--resume` continues; exports TorchScript on each new best |
-| measure + gate | `python lpi_v4/lpi_eval.py --ckpt lpi_v4/run/lpi_v4.best.pt --fit-warden 800 --md run/eval.md --out-json run/eval.json` | exit code 0 = every gate passes → usable as a CI step |
+| docs ↔ argparse | `python lpi_v4/check_docs.py` | 77 documented/printed commands must name real scripts and real flags; also a pytest case, so a stale hint fails CI rather than a bench run |
+| train | `python lpi_v4/lpi_train.py --epochs 45 --steps 24 --batch 48` | saves every epoch; `--resume` continues; re-exports the TorchScript pair from the *best* snapshot at the end and writes `run/export_manifest.json` (sha256 of what it mirrored) |
+| measure + gate | `python lpi_v4/lpi_eval.py --ckpt lpi_v4/run/lpi_v4.best.pt --fit-warden 800 --md run/eval.md --out-json run/eval.json` | exit code 0 = every gate passes → usable as a CI step. Any check that *could not* fail (no `--fit-warden`, no real capture) is printed as `n/a` and listed in `gate_vacuous` in the JSON, so a short run cannot be quoted as a measurement |
 | bench link test (no radio) | `python lpi_v4/rx_usrp.py --selftest` | TX→channel→RX→AES/RS→text, in one process |
 | GRC-path test (no GNU Radio) | `python lpi_v4/lpi_grc.py` | exercises the exact blocks the `.grc` embeds |
 | radio TX / RX | `python lpi_v4/tx_usrp.py …` / `python lpi_v4/rx_usrp.py …` | raw UHD, no flowgraph needed; `--file`/`--capture` for cable-free iteration |

@@ -181,7 +181,9 @@ def block_stealth(gen, dec, wd, cfg, device, n=4096, fit_steps=0):
            "adv_acc": acc, "adv_auc": auc}
     if fit_steps:
         fw = fit_warden(gen, cfg, device, steps=fit_steps)
+        fw["fit_steps"] = int(fit_steps)   # adversary accuracy is a function of the
         st = fw.pop("state")
+        # detector's training budget, so the budget belongs next to the number
         out.update({f"fit_{k}": v for k, v in fw.items()})
         torch.save({"warden1": st, "note": "detector fitted with the Table-5 protocol"},
                    "run/warden_fitted.pt")
@@ -388,6 +390,10 @@ def main():
     ap.add_argument("--config", default="")
     ap.add_argument("--key", default="SESSION-KEY")
     ap.add_argument("--frames", type=int, default=512)
+    ap.add_argument("--n-msg", type=int, default=16,
+                    help="messages per SNR for the message-layer block; FER is a "
+                         "1/this-resolution measurement, so a small number cannot "
+                         "support a '<5 %%' claim (4 messages resolve 25 %% steps)")
     ap.add_argument("--snrs", default="-2,0,2,4,6,8,10")
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--capture", default="")
@@ -407,6 +413,11 @@ def main():
                     help="CFO half-range used by the FIELD block (the pilot fine sync "
                          "is unambiguous to +/-(fs/2/frame_period); larger offsets are "
                          "handled by rx_usrp.py --coarse, not by this benchmark)")
+    ap.add_argument("--gate-snr-min", type=float, default=5.0,
+                    help="the SNR the acceptance line is measured at: ber_field/fer are "
+                         "the worst value over SNR >= this, because 'BER < 1%%' only means "
+                         "something at a stated operating point (0 = gate on every SNR in "
+                         "--snrs, which makes the verdict depend on the list you typed)")
     ap.add_argument("--out-json", default="run/eval.json")
     ap.add_argument("--md", default="",
                     help="also write a human-readable Markdown report here")
@@ -432,7 +443,7 @@ def main():
                                           fit_steps=args.fit_warden),
            "block_link": block_link(gen, dec, cfg, device, snrs, n=args.frames, key=args.key),
            "block_message": block_message(gen, dec, cfg, device, snrs, args.key,
-                                          n_msg=4, mode=args.mode),
+                                          n_msg=args.n_msg, mode=args.mode),
            "block_capture": block_capture(gen, dec, cfg, device, args, snrs[len(snrs) // 2],
                                     args.key)}
     if args.uhd:
@@ -441,10 +452,22 @@ def main():
     st, ln, ms = rep["block_stealth"], rep["block_link"], rep["block_message"]
     if "fit_adv_acc" in st:
         st["adv_acc"], st["adv_auc"] = st["fit_adv_acc"], st["fit_adv_auc"]
-    worst = max(ln.values(), key=lambda r: r["field"])
-    fer = max(r["fer"] for r in ms.values())
+    # "field BER < 1 %" is a claim about an operating point, so the gate takes the
+    # worst value over SNR >= --gate-snr-min (the band the paper claims) instead of
+    # over whatever list was typed on the command line.  The full sweep is still
+    # printed, and still in the JSON -- the band changes the verdict, not the data.
+    band = {k: v for k, v in ln.items() if k >= args.gate_snr_min} or dict(ln)
+    worst_snr = max(band, key=lambda k: band[k]["field"])
+    worst = band[worst_snr]
+    fer_band = {k: v for k, v in ms.items() if k >= args.gate_snr_min} or dict(ms)
+    fer = max(r["fer"] for r in fer_band.values())
+    strict_snr = max(ln, key=lambda k: ln[k]["field"])
+    rep["gate_band_db"] = [float(args.gate_snr_min), float(max(ln))]
+    rep["gate_worst_snr_db"] = float(worst_snr)
+    rep["gate_note"] = (f"ber/fer = worst over SNR >= {args.gate_snr_min:g} dB "
+                        f"({len(band)} of {len(ln)} sweep points)")
     checks = {
-                "adv_in_50s": abs((st.get("fit_adv_acc") or st["adv_acc"]) - 50) <= 6,
+        "adv_in_50s": abs((st.get("fit_adv_acc") or st["adv_acc"]) - 50) <= 6,
         "ks>0.05": st["ks_p"] > GATE["ks"],
         "ew>=7/8": st["n_pass"] >= 7,
         "ber_field<1%": worst["field"] < GATE["ber_field"],
@@ -452,11 +475,30 @@ def main():
         "capture_decodes": rep["block_capture"].get("found", 0) > 0
         and rep["block_capture"].get("ber", 1) < GATE["ber_field"],
     }
+    # A PASS that could not have failed is not a measurement.  Which checks are in
+    # that state depends on how the script was called, so say it out loud instead of
+    # letting a 6-epoch CI run look like it proved something about the adversary.
+    vacuous = {}
+    if "fit_adv_acc" not in st:
+        vacuous["adv_in_50s"] = ("no --fit-warden: an untrained detector scores ~50% "
+                                 "by construction, so this is not evidence")
+    if not args.capture:
+        vacuous["capture_decodes"] = ("capture was synthesized here, so it tests the "
+                                      "codec/framing, not the radio front end")
+    nmsg = max(int(r.get("n", 0)) for r in ms.values())
+    if nmsg * len(ms) < 64:
+        vacuous["fer<5%"] = (f"only {nmsg} messages per SNR: FER resolves "
+                             f"{100.0 / nmsg:.0f} % steps, far coarser than 5 %")
+    rep["gate_vacuous"] = vacuous
     print("\n================= FIELD GATE =================")
     for k, v in checks.items():
-        print(f"  [{'PASS' if v else 'FAIL'}] {k}")
-    print("  worst-field:", f"{worst['field']:.2e} dB-BER @{max(ln)}",
-          "| worst-FER", f"{fer:.1%}")
+        print(f"  [{'PASS' if v else 'FAIL'}] {k}"
+              + (f"   (n/a: {vacuous[k]})" if k in vacuous else ""))
+    print("  worst-field:", f"BER {worst['field']:.2e} @{worst_snr:g} dB",
+          "| worst-FER", f"{fer:.1%} over {nmsg} msgs/SNR", "|", rep["gate_note"])
+    if strict_snr != worst_snr:
+        print(f"  (full sweep, not gated: worst BER {ln[strict_snr]['field']:.2e} "
+              f"@{strict_snr:g} dB, FER {max(r['fer'] for r in ms.values()):.1%})")
     print("=====================================\n")
     rep["gate"] = checks
     rep["all_pass"] = bool(all(checks.values()))
@@ -485,6 +527,9 @@ def md_report(rep, cfg):
     for k in ("ks_p", "kurt", "entropy", "circ", "papr", "scf", "c42", "wvd", "Sc",
               "adv_acc", "adv_auc"):
         L.append(f"| {k} | {st[k]:.4g} |")
+    if "fit_steps" in st:
+        L.append(f"| adv protocol | fresh CNN detector, {st['fit_steps']} steps on "
+                 f"2600 train / 1000 held-out frames (disjoint pools) |")
     L += ["", "### Link (per-bit BER)", "| SNR | MF | in-graph | field | FER |",
           "|---|---|---|---|---|"]
     for s, r in ln.items():
@@ -495,8 +540,11 @@ def md_report(rep, cfg):
     for s, r in ms.items():
         L.append(f"| {s:g} | {r['ber']:.2e} | {r['fer']:.1%} | {r['msgs_ok']}/{r['n']} |")
     L += ["", "### Gate", ""]
+    if rep.get("gate_note"):
+        L.append(f"*{rep['gate_note']}*  ")
     for k, v in rep["gate"].items():
-        L.append(f"- [{'x' if v else ' '}] {k}")
+        note = rep.get("gate_vacuous", {}).get(k)
+        L.append(f"- [{'x' if v else ' '}] {k}" + (f" -- *not measured*: {note}" if note else ""))
     L.append("")
     L.append(f"**overall: {'ALL TARGETS MET' if rep['all_pass'] else 'NOT YET PASSING'}**")
     return "\n".join(L)

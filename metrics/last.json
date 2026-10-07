@@ -1,6 +1,13 @@
 {
- "source": "lpi_eval.py --ckpt run/lpi_v4.best.pt --fit-warden 400 --n-stealth 1200 --frames 96",
+ "source": "python lpi_v4/lpi_eval.py --ckpt run/lpi_v4.best.pt --frames 512 --snrs 0,2,4,6,8,10 --n-msg 16 --fit-warden 400",
  "date": "2026-10-07",
+ "protocol": {
+  "frames": 512,
+  "n_msg_per_snr": 16,
+  "fit_warden_steps": 400,
+  "gate_snr_min_db": 5.0,
+  "device": "cpu"
+ },
  "block_stealth": {
   "ks_p": 0.8645853400230408,
   "kurt": 2.9906842708587646,
@@ -13,23 +20,180 @@
   "Sc": 0.13991659145862698,
   "n_pass": 8,
   "adv_acc": 55.900001525878906,
-  "adv_auc": 0.58578
+  "adv_auc": 0.58578,
+  "fit_adv_acc": 55.900001525878906,
+  "fit_adv_auc": 0.58578,
+  "fit_n_train": 1300,
+  "fit_n_test": 500,
+  "fit_steps": 400,
+  "fit_fit_steps": 400
  },
  "block_link": {
-  "2.0": {
-   "field": 0.0018717447916666667,
-   "fer": 0.1875,
-   "graph": 0.0013020833333333333
+  "0.0": {
+   "mf": 0.010345458984375,
+   "graph": 0.006256103515625,
+   "field": 0.0100250244140625,
+   "fer": 0.6640625,
+   "offset": 76,
+   "start_sample": 1228,
+   "cfo_hz": 58.13986078009599,
+   "coarse_hz": 0.0,
+   "n_frames": 512,
+   "dropped_frames": 4,
+   "pilot_snr_db": 18.629036741398842
   },
-  "5.0": {
-   "field": 0.0,
-   "fer": 0.0,
-   "graph": 8.138020833333333e-05
+  "2.0": {
+   "mf": 0.003265380859375,
+   "graph": 0.0013580322265625,
+   "field": 0.00213623046875,
+   "fer": 0.2265625,
+   "offset": 76,
+   "start_sample": 1228,
+   "cfo_hz": 25.7846844448889,
+   "coarse_hz": 0.0,
+   "n_frames": 512,
+   "dropped_frames": 4,
+   "pilot_snr_db": 19.94557682523763
+  },
+  "4.0": {
+   "mf": 0.000885009765625,
+   "graph": 0.0001678466796875,
+   "field": 0.000244140625,
+   "fer": 0.03125,
+   "offset": 76,
+   "start_sample": 1228,
+   "cfo_hz": 69.25217691956043,
+   "coarse_hz": 0.0,
+   "n_frames": 512,
+   "dropped_frames": 4,
+   "pilot_snr_db": 22.026413141901088
+  },
+  "6.0": {
+   "mf": 0.0004119873046875,
+   "graph": 0.0,
+   "field": 3.0517578125e-05,
+   "fer": 0.00390625,
+   "offset": 76,
+   "start_sample": 1228,
+   "cfo_hz": -78.23623065210772,
+   "coarse_hz": 0.0,
+   "n_frames": 512,
+   "dropped_frames": 4,
+   "pilot_snr_db": 24.229967442935518
   },
   "8.0": {
+   "mf": 0.0001220703125,
+   "graph": 0.0,
    "field": 0.0,
    "fer": 0.0,
-   "graph": 0.0
+   "offset": 76,
+   "start_sample": 1228,
+   "cfo_hz": 32.53850483063092,
+   "coarse_hz": 0.0,
+   "n_frames": 512,
+   "dropped_frames": 4,
+   "pilot_snr_db": 26.218771186852194
+  },
+  "10.0": {
+   "mf": 3.0517578125e-05,
+   "graph": 0.0,
+   "field": 0.0,
+   "fer": 0.0,
+   "offset": 76,
+   "start_sample": 1228,
+   "cfo_hz": -33.78253458308162,
+   "coarse_hz": 0.0,
+   "n_frames": 512,
+   "dropped_frames": 4,
+   "pilot_snr_db": 28.245471455766776
   }
+ },
+ "block_message": {
+  "0.0": {
+   "fer": 0.25,
+   "ber": 0.008463541666666666,
+   "msgs_ok": 12,
+   "n": 16,
+   "offset": 76,
+   "start_sample": 1228,
+   "cfo_hz": -0.1674326757677886,
+   "coarse_hz": 0.0,
+   "n_frames": 48,
+   "dropped_frames": 6,
+   "pilot_snr_db": 18.74274866086782
+  },
+  "2.0": {
+   "fer": 0.0,
+   "ber": 0.0022786458333333335,
+   "msgs_ok": 16,
+   "n": 16,
+   "offset": 76,
+   "start_sample": 1228,
+   "cfo_hz": 98.60152287858779,
+   "coarse_hz": 0.0,
+   "n_frames": 48,
+   "dropped_frames": 6,
+   "pilot_snr_db": 23.28631846260415
+  },
+  "4.0": {
+   "fer": 0.0,
+   "ber": 0.00048828125,
+   "msgs_ok": 16,
+   "n": 16,
+   "offset": 76,
+   "start_sample": 1228,
+   "cfo_hz": -144.8157060746315,
+   "coarse_hz": 0.0,
+   "n_frames": 48,
+   "dropped_frames": 6,
+   "pilot_snr_db": 20.912490630509023
+  },
+  "6.0": {
+   "fer": 0.0,
+   "ber": 0.0,
+   "msgs_ok": 16,
+   "n": 16,
+   "offset": 76,
+   "start_sample": 1228,
+   "cfo_hz": -93.94016188732088,
+   "coarse_hz": 0.0,
+   "n_frames": 48,
+   "dropped_frames": 6,
+   "pilot_snr_db": 26.151676758170368
+  },
+  "8.0": {
+   "fer": 0.0,
+   "ber": 0.0,
+   "msgs_ok": 16,
+   "n": 16,
+   "offset": 76,
+   "start_sample": 1228,
+   "cfo_hz": 139.1314627538498,
+   "coarse_hz": 0.0,
+   "n_frames": 48,
+   "dropped_frames": 6,
+   "pilot_snr_db": 25.032002800531842
+  },
+  "10.0": {
+   "fer": 0.0,
+   "ber": 0.0,
+   "msgs_ok": 16,
+   "n": 16,
+   "offset": 76,
+   "start_sample": 1228,
+   "cfo_hz": -69.92340003524947,
+   "coarse_hz": 0.0,
+   "n_frames": 48,
+   "dropped_frames": 6,
+   "pilot_snr_db": 28.37413712083526
+  }
+ },
+ "gate": {
+  "adv_in_50s": true,
+  "ks>0.05": true,
+  "ew>=7/8": true,
+  "ber_field<1%": true,
+  "fer<5%": true,
+  "capture_decodes": true
  }
 }

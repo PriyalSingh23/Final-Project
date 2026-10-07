@@ -4,6 +4,7 @@ REM  ShadowComm LPI v4 - one entry point for everything on Windows.
 REM  Usage:  lpi_v4\v4.bat <command> [extra args...]
 REM
 REM    test   pytest loopback + framing tests (no GPU, no radio)
+REM    check  check_docs.py          : do the documented commands still parse?
 REM    loop   rx_usrp.py --selftest  : TX -> channel -> RX -> AES/RS -> text
 REM    grc    lpi_grc.py             : exercises the blocks the .grc files embed
 REM    train  lpi_train.py           : add --epochs 200 etc. to override
@@ -24,6 +25,7 @@ set PYTHONPATH=%HERE%;%PYTHONPATH%
 set OMP_NUM_THREADS=4
 
 if /I "%1"=="test"  goto test
+if /I "%1"=="check" goto check
 if /I "%1"=="loop"  goto loop
 if /I "%1"=="grc"   goto grc
 if /I "%1"=="train" goto train
@@ -36,6 +38,10 @@ goto help
 
 :test
 %LPI_PYTHON% -m pytest "%HERE%..\tests" -q -m "not slow" %2 %3 %4
+goto end
+
+:check
+%LPI_PYTHON% "%HERE%check_docs.py" %2 %3 %4
 goto end
 
 :loop
@@ -72,7 +78,7 @@ cd /d "%HERE%"
 goto end
 
 :help
-echo commands: test loop grc train eval tx rx info py
+echo commands: test check loop grc train eval tx rx info py
 echo (see the comments at the top of this file for what each one runs)
 exit /b 2
 

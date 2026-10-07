@@ -48,7 +48,40 @@ def _load(cfg_json: str, ckpt: str, device: str = "cpu"):
     dec.tie_to(gen)
     gen.eval(); dec.eval()
     torch.set_grad_enabled(False)
+    _warn_if_export_is_stale(ckpt)
     return cfg, gen, dec
+
+
+def _warn_if_export_is_stale(ckpt: str) -> None:
+    """Say so if ``generator_lpi.pt`` / ``decoder_lpi.pt`` beside *ckpt* came from
+    another checkpoint.
+
+    The exported pair is a *mirror*, and hand-written GRC blocks load the mirror
+    rather than the ``.pt`` -- so a stale mirror means transmitting or decoding with
+    weights nobody measured (this repo shipped one like that for a commit; see
+    FINDINGS.md).  Warn and carry on: what tx_usrp.py / rx_usrp.py and the v4
+    flowgraphs use here is the checkpoint itself, which is fine.
+    """
+    if not ckpt or not os.path.exists(ckpt):
+        return
+    d = os.path.dirname(os.path.abspath(ckpt))
+    man = os.path.join(d, "export_manifest.json")
+    if not os.path.exists(man):
+        return
+    try:
+        import hashlib
+        import json
+        rec = json.load(open(man))
+        digest = hashlib.sha256(open(ckpt, "rb").read()).hexdigest()
+    except Exception:
+        return                            # never block a transmit on bookkeeping
+    if rec.get("sha256") and rec["sha256"] != digest:
+        print("[lpi_grc] WARNING: export_manifest.json in " + d + " says the TorchScript "
+              "pair there was exported from " + str(rec.get("exported_from"))
+              + " (epoch " + str(rec.get("epoch")) + "), not from "
+              + os.path.basename(ckpt) + ". A block loading generator_lpi.pt / "
+              "decoder_lpi.pt would use unmeasured weights -- re-export it with "
+              "lpi_train.export_for_grc(ckpt, device, outdir).")
 
 
 class TxCore:
@@ -330,6 +363,11 @@ if __name__ == "__main__":
                          "+-fs/(2*frame_period) the pilot fine sync aliases and the "
                          "coarse acquisition has to run (it does, automatically).")
     ap.add_argument("--print-sources", action="store_true")
+    ap.add_argument("--selftest", dest="selftest", action="store_true", default=True,
+                    help="the default behaviour, spelled out, so that the field "
+                         "checklist's `lpi_grc.py --selftest` is a real command: run "
+                         "the TxCore/RxCore loopback over the modelled channel (needs "
+                         "no GNU Radio and no radio)")
     a = ap.parse_args()
     if a.print_sources:
         for s in make_grc_sources():

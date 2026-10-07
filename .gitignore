@@ -6,6 +6,7 @@ lpi_v4/run/*
 !lpi_v4/run/generator_lpi.pt
 !lpi_v4/run/decoder_lpi.pt
 !lpi_v4/run/lpi_config.json
+!lpi_v4/run/export_manifest.json
 !lpi_v4/run/lpi_v4.csv
 !lpi_v4/run/eval.json
 !lpi_v4/run/eval.md

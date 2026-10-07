@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import os
@@ -369,11 +370,23 @@ def main() -> None:
                 save_config(cfg, args.out.replace(".pt", ".best.json"))
                 print(f"  [best] score {score:.1f} -> {args.out.replace('.pt', '.best.pt')}")
             if args.export_every and ep % args.export_every == 0:
-                export_for_grc(args.out, device, args.export_dir or None)
+                # a mid-run peek, in a subfolder: the blocks load run/generator_lpi.pt,
+                # so writing the *current* epoch over the *best* one would be a lie
+                peek = os.path.join(_export_dir(args), "intermediate")
+                export_for_grc(args.out, device, peek)
 
         print(f"\n[done] {args.epochs} epochs in {(time.time()-t0)/60:.1f} min")
-        print(f"[done] best snapshot: {args.out.replace('.pt', '.best.pt')}")
-        print("[done] next: python lpi_eval.py --ckpt <best> ; python link_test.py --full")
+        best_ckpt = args.out.replace(".pt", ".best.pt")
+        if os.path.exists(best_ckpt):
+            # the last thing a run does is make run/ match its own best snapshot --
+            # an --export-every peek or an interrupted loop cannot leave drift
+            export_for_grc(best_ckpt, device, _export_dir(args))
+        print(f"[done] best snapshot: {best_ckpt}")
+        # a hint the user follows must be a command that exists -- `link_test.py`
+        # never did (lpi_v4/check_docs.py now fails the build if one rots again)
+        print(f"[done] next: python lpi_eval.py --ckpt {best_ckpt} --frames 512 "
+              f"--fit-warden 800 --md run/eval.md --out-json run/eval.json")
+        print("[done] then, with no radio attached: python rx_usrp.py --selftest")
     if tb:
         tb.close()
 
@@ -430,6 +443,11 @@ def link_ber(G, D, cfg: LPIConfig, device, n_frames: int = 256, snr_db: float = 
 
 
 # =========================================================================
+def _export_dir(args) -> str:
+    """Where the canonical TorchScript pair goes (default: beside --out, i.e. run/)."""
+    return args.export_dir or os.path.dirname(os.path.abspath(args.out))
+
+
 def export_for_grc(ckpt: str, device: str = "cpu", outdir: str | None = None) -> None:
     """TorchScript export for the GNU Radio Python blocks / the USRP scripts."""
     outdir = outdir or os.path.dirname(os.path.abspath(ckpt))
@@ -451,7 +469,18 @@ def export_for_grc(ckpt: str, device: str = "cpu", outdir: str | None = None) ->
     gg.save(os.path.join(outdir, "generator_lpi.pt"))
     dd.save(os.path.join(outdir, "decoder_lpi.pt"))
     save_config(cfg, os.path.join(outdir, "lpi_config.json"))
-    print(f"[export] generator_lpi.pt + decoder_lpi.pt + lpi_config.json -> {outdir}")
+    # A mirror is only honest while it is a mirror: record the bytes it came from so
+    # `run/generator_lpi.pt` can never silently be from another epoch than the
+    # checkpoint the metrics were measured on (that happened once -- see FINDINGS).
+    with open(ckpt, "rb") as fh:
+        digest = hashlib.sha256(fh.read()).hexdigest()
+    with open(os.path.join(outdir, "export_manifest.json"), "w") as fh:
+        json.dump({"exported_from": os.path.basename(ckpt), "sha256": digest,
+                   "epoch": ck.get("epoch"),
+                   "files": ["generator_lpi.pt", "decoder_lpi.pt", "lpi_config.json"]},
+                  fh, indent=1)
+    print(f"[export] generator_lpi.pt + decoder_lpi.pt + lpi_config.json -> {outdir}"
+          f"  (from {os.path.basename(ckpt)}, epoch {ck.get('epoch')}, sha256 {digest[:12]})")
 
 
 if __name__ == "__main__":

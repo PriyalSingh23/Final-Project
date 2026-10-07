@@ -111,6 +111,14 @@ by epoch 41 in one run). v4 therefore freezes the wardens after `--d-stop-frac`
 of the run (the paper's protocol: train the detector, then measure it) and only
 accepts a "best checkpoint" from epochs inside that frozen regime.
 
+**The adversary number belongs to the detector, not only to the generator.** Re-fitting
+the held-out CNN with 800 steps instead of 400 on the *same frozen generator* moved the
+score from 55.90 % (AUC 0.5858) to **58.80 %** (AUC 0.6164) — the 48–56 % band is met at
+the paper's budget and missed at twice it, which is what "the generator is only as
+invisible as the detector you tried" means in practice. Both numbers are in
+`run/eval.json`-style output now (`fit_steps` is recorded next to `fit_adv_acc`), so a
+reviewer can see which claim came from which budget instead of picking the flattering one.
+
 ## 5. What the statistical losses are actually for
 
 Measured with a **completely untrained** generator (random weights, 512 frames):
@@ -187,7 +195,36 @@ detectors that could tell it apart, not merely against a scalar KS test.
   and both workflows point it at a scratch folder; a run that means to feed the
   radio still exports into `run/` by default.
 
+* **The exported TorchScript was not the measured model.** `run/generator_lpi.pt` and
+  `run/decoder_lpi.pt` -- the pair a hand-written GNU Radio block loads, and the pair the
+  notebook zips up as "for GNU Radio / the USRP scripts" -- disagreed with
+  `run/lpi_v4.best.pt` in **28 of 28** decoder tensors (max |Δ| 0.198). It was not the
+  legacy v1 export either (that file is 512 kB, this one 648 kB); which epoch of which
+  run produced it is no longer recoverable, because the tuning run dirs that held the
+  other snapshots were scratch and are gone. `lpi_train.py` now re-exports the *best*
+  snapshot as the last thing it does, `--export-every` writes to
+  `<export-dir>/intermediate/` so a mid-run peek cannot overwrite the canonical pair,
+  and every export drops `export_manifest.json` with the source filename and the
+  checkpoint's sha256. `tests/test_lpi_v4.py::test_exported_torchscript_matches_the_checkpoint`
+  checks the numbers *and* the digest, so a mirror that is not a mirror fails the build.
+  (No published metric changed: `lpi_eval.py`, `rx_usrp.py` and the v4 flowgraphs all load
+  `run/lpi_v4.best.pt` itself -- the stale pair could only have bitten a custom block.)
+* **Documentation is an interface, so it gets a test.** `lpi_v4/check_docs.py` parses every
+  command line in the READMEs, the field checklist, `v4.bat`, the workflows, the notebook
+  *and* the scripts' own docstrings/`print` hints, resolves each named script, and checks
+  each `--flag` against that script's argparse (77 references right now). It found the
+  `--md` story above, a `link_test.py --full` hint pointing at a file nobody wrote,
+  and `lpi_grc.py --selftest` documented but undefined (the self-test *was* the default
+  behaviour, so the flag is now real). Same reasoning as the paper's thresholds: a number
+  nobody checks drifts.
+
 ## 8. Current state of every acceptance metric
+
+One command produced this column, on the shipped checkpoint, on CPU:
+`lpi_eval.py --ckpt run/lpi_v4.best.pt --frames 512 --snrs 0,2,4,6,8,10 --n-msg 16
+--fit-warden 400` (gate band `--gate-snr-min 5` dB). Quote it together with the
+numbers: KS p and FER move with `--frames`/`--n-msg`, and the adversary moves with
+`--fit-warden`, so a number without its protocol is not reproducible.
 
 | gate (checklist) | target | v4 canonical | verdict |
 |---|---|---|---|
@@ -200,10 +237,10 @@ detectors that could tell it apart, not merely against a scalar KS test.
 | C42 | < 0.3 | −0.005 | PASS |
 | WVD TF ratio | < 3.7 | 1.017 | PASS |
 | composite `Sc` | < 0.20 (Good) | 0.140 | PASS ("Excellent" is < 0.10) |
-| adversary accuracy | 48–56 % | 55.9 % (held-out), AUC 0.586 | PASS |
-| BER, cable | < 1 % | 0.0 at 5 dB, 1.9e-3 at 2 dB | PASS |
-| BER, antenna | < 5 % | field path 0.0 at 5 dB incl. all 5 impairments | PASS (to be confirmed on hardware) |
-| message FER (CRC+RS+AES) | — | 0 % at 5 dB and 2 dB, 4/4 exact texts | PASS |
+| adversary accuracy | 48–56 % | 55.90 % (400 fit steps), AUC 0.5858 — **58.80 %** / AUC 0.6164 at 800 steps | PASS at the paper's detector budget, *missed* at 2× it (§4) |
+| BER, cable | < 1 % | 0.0 at 8/10 dB, 3.05e-5 at 6 dB, 2.14e-3 at 2 dB; 1.00e-2 at 0 dB | PASS for every SNR ≥ 2 dB (0 dB is below the claimed operating point) |
+| BER, antenna | < 5 % | field path (5 impairments) 2.44e-4 at 4 dB, 0.0 at ≥8 dB | PASS (to be confirmed on hardware) |
+| message FER (CRC+RS+AES) | — | 0 % at every SNR ≥ 2 dB (16 msgs/SNR = 96 texts, all exact); 25 % at 0 dB | PASS |
 | cyclostationary ratio | ≈ 1× | 1.013 | PASS |
 
 Not yet demonstrated (needs the bench, not the sandbox): live UHD streaming at

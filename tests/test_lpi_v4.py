@@ -286,3 +286,92 @@ def test_cli_flags_are_all_defined():
         if missing:
             offenders[name] = missing
     assert not offenders, f"args read but never defined: {offenders}"
+
+
+def test_documented_commands_match_argparse():
+    """Every command line this repo documents or prints must actually run.
+
+    ``lpi_v4/check_docs.py`` exists because two things rotted in exactly this gap
+    and were invisible to every other test here: ``--md`` (used by the workflows,
+    the Colab cell and v4.bat, but no longer defined -- exit 2 in CI, which reads
+    like a metric regression) and a ``python link_test.py --full`` hint in
+    lpi_train.py pointing at a script nobody ever wrote.
+    """
+    import check_docs
+
+    missing, bad, n = check_docs.scan()
+    assert n > 20, f"the scan matched only {n} commands -- did the DOCS list break?"
+    assert not missing, "documents a script that does not exist: " + ", ".join(
+        f"{rel}: {name}" for rel, name, _ in missing)
+    assert not bad, "documented flag is not defined by argparse: " + ", ".join(
+        f"{name} {fl} ({rel})" for rel, name, fl, _ in bad)
+
+
+def test_exported_torchscript_matches_the_checkpoint():
+    """The .grc blocks and tx/rx_usrp.py load ``run/{generator,decoder}_lpi.pt``, not
+    the training checkpoint, so the export must be a faithful copy of it.
+
+    Two silent failure modes this pins: a trace that baked in a stale key tie
+    (`LPIDecoder.tie_to`), and a smoke run exporting *its own* weights next to a
+    different config -- both produce files that load happily and decode garbage.
+    """
+    import json
+
+    best_pt = os.path.join(V4, "run", "lpi_v4.best.pt")
+    dec_pt = os.path.join(V4, "run", "decoder_lpi.pt")
+    gen_pt = os.path.join(V4, "run", "generator_lpi.pt")
+    if not all(os.path.exists(p) for p in (best_pt, dec_pt, gen_pt)):
+        pytest.skip("no exported TorchScript next to the checkpoint")
+
+    ck = torch.load(best_pt, map_location="cpu", weights_only=False)
+    cfg = LPIConfig(**{k: (tuple(v) if k == "snr_range" else v)
+                       for k, v in ck["cfg"].items()})
+    # exactly the recipe lpi_eval.load_models() uses -- seed, build, tie, then load.
+    # A decoder built without tie_to() differs by O(1), which is the single easiest
+    # way to "test" the export and conclude it is broken.
+    torch.manual_seed(0)
+    G = LPIGenerator(cfg).eval()
+    D = LPIDecoder(cfg).eval()
+    D.tie_to(G)
+    G.load_state_dict(ck["generator"], strict=False)
+    D.load_state_dict(ck["decoder"], strict=False)
+
+    torch.manual_seed(0)
+    y = torch.randn(8, 2, cfg.frame_len)
+    with torch.no_grad():
+        eager = D(y)
+        script = torch.jit.load(dec_pt).eval()(y)
+    assert tuple(eager.shape) == tuple(script.shape), (eager.shape, script.shape)
+    assert torch.allclose(eager, script, atol=1e-4, rtol=1e-4), \
+        f"exported decoder drifts from the checkpoint: {(eager - script).abs().max():.2e}"
+
+    # The generator draws fresh masking noise on every call -- that IS the design --
+    # so it can only be checked for shape/energy, never bitwise (check_trace=False).
+    Gs = torch.jit.load(gen_pt).eval()          # weights are inside the script
+    with torch.no_grad():
+        out = Gs(torch.zeros(4, cfg.z_dim), torch.ones(4, cfg.n_bits))
+    assert tuple(out.shape) == (4, 2, cfg.frame_len), out.shape
+    assert torch.isfinite(out).all()
+
+    # And the mirror must declare what it mirrors.  `lpi_config.json` is required to
+    # equal the checkpoint's own cfg dict exactly -- including cfo_max, which is a
+    # training-time impairment range and NOT a field limit (the radio benchmark takes
+    # that from lpi_eval --cfo-max / rx_usrp --coarse-span, not from this file).
+    man_p = os.path.join(V4, "run", "export_manifest.json")
+    assert os.path.exists(man_p), (
+        "run/*.pt exports predate export_for_grc's manifest -- regenerate them with "
+        "python -c \"from lpi_train import export_for_grc; export_for_grc("
+        "\"run/lpi_v4.best.pt\",\"cpu\",\"run\")\" so they are provably the "
+        "measured model")
+    import hashlib
+
+    man = json.load(open(man_p))
+    assert man["exported_from"] == "lpi_v4.best.pt", man
+    digest = hashlib.sha256(open(best_pt, "rb").read()).hexdigest()
+    assert man["sha256"] == digest, (
+        f"the exported TorchScript came from {man['exported_from']}@"
+        f"{man.get('epoch')}, not from the checkpoint under test")
+    exported = json.load(open(os.path.join(V4, "run", "lpi_config.json")))
+    assert exported == ck["cfg"], {
+        k: (exported.get(k), ck["cfg"].get(k))
+        for k in set(exported) | set(ck["cfg"]) if exported.get(k) != ck["cfg"].get(k)}

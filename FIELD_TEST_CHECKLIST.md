@@ -9,11 +9,20 @@ processing gain. One AES/RS burst = 3 frames = 7.0 ms.
 ```bat
 C:\Users\yasht\radioconda\python.exe lpi_v4\v4.bat loop
 C:\Users\yasht\radioconda\python.exe lpi_v4\v4.bat eval
+C:\Users\yasht\radioconda\python.exe lpi_v4\v4.bat check   :: docs/CLI drift, 1 s
 :: cable loopback (>= 20 dB attenuator between TX/RX and RX2):
 C:\Users\yasht\radioconda\python.exe lpi_v4\tx_usrp.py --text "ALPHA-INDIA-001" --bursts 20 --loop --period 0.2 --rate 245760 --gain 0
 C:\Users\yasht\radioconda\python.exe lpi_v4\rx_usrp.py --watch --seconds 0.25 --gain 30 --rate 245760 --json-out rx_log.jsonl
 :: antennas: same, raise tx_gain 0 -> 20, expect pilot-SNR > 15 dB
 ```
+
+Before the first transmit, check that the TorchScript in `lpi_v4\run\` is the model
+you measured: `run/export_manifest.json` stores the `sha256` of the checkpoint it was
+exported from, so `python -c "import hashlib;print(hashlib.sha256(open(r'lpi_v4/run/lpi_v4.best.pt','rb').read()).hexdigest())"`
+has to print that same digest. (It is also `pytest`'s `test_exported_torchscript_matches_the_checkpoint`.)
+Related trap: the *legacy* `rx_lpi_cgan.grc` loads `decoder_lpi.pt` from
+`C:\Users\yasht\Desktop\LPI_CGAN\` -- v1's 256-bit model. Same filename, different
+architecture; the v4 flowgraphs load `run/lpi_v4.best.pt` through `lpi_grc.py` instead.
 
 Expected on every capture: `frames > 0`, `pilot-SNR > 12 dB`, `bursts N crc N/N OK`,
 `CFO` within +-6 kHz (found automatically), text matching exactly. Pass criteria are

@@ -16,8 +16,10 @@ uhd_io.py       version-tolerant UHD wrapper (send/recv, sc16 packing)
 lpi_grc.py      the two GNU Radio blocks (pure python, testable without GR)
 make_grc.py     regenerates tx_lpi_v4.grc / rx_lpi_v4.grc from lpi_grc.py
 make_bits_file.py  writes the coded .dat that the GRC transmitter reads
+check_docs.py   proves the commands in these docs still match argparse
 v4.bat          Windows entry point for all of the above
 run/            checkpoints, per-epoch CSV, eval reports, exported TorchScript
+                (+ export_manifest.json: which checkpoint that TorchScript came from)
 ```
 
 **One source of truth for the physics.** `LPIConfig` defines frame length, pilot
@@ -52,7 +54,7 @@ python lpi_train.py --epochs 45 --steps 24 --batch 48 \
 # GPU / Colab:  --epochs 200 --steps 60 --batch 96
 # with real captures as hard negatives:  --radioml --data GOLD_XYZ_OSC.0001_1024.hdf5
 python lpi_eval.py --ckpt run/lpi_v4.best.pt --frames 512 --snrs 0,2,4,6,8,10 \
-    --fit-warden 800 --md run/eval.md --out-json run/eval.json
+    --n-msg 16 --fit-warden 400 --md run/eval.md --out-json run/eval.json
 ```
 
 The epoch row printed by the trainer *is* the gate: `bce` (decodability), `link`
@@ -73,15 +75,35 @@ see `../FINDINGS.md` §1.
 
 ## Measured (CPU, this repo, `run/lpi_v4.best.pt`)
 
+Every number below is from one command, run on the shipped checkpoint:
+`lpi_eval.py --frames 512 --snrs 0,2,4,6,8,10 --n-msg 16 --fit-warden 400`
+(gate band `--gate-snr-min 5`, i.e. the SNR the acceptance line is claimed at).
+
 | | target | measured |
 |---|---|---|
-| KS p (IQ vs AWGN) | > 0.05 (want > 0.85) | **0.865** |
-| kurtosis / entropy / circularity | 3.0 / >0.95 / <0.15 | 2.991 / 0.957 / 0.011 |
-| PAPR dev / SCF / C42 / WVD | <3 dB / <3 / <0.3 / <3.7 | +0.01 dB / 1.013 / −0.005 / 1.017 |
-| composite `Sc` | <0.20 | **0.140** (8/8 domains) |
-| adversary, held-out fitted detector | 48–56 % | **55.9 %**, AUC 0.586 |
-| field BER (sync + CFO + phase noise + DC + IQ) | <1 % cable | **0.0** at 5 dB, 1.9e-3 at 2 dB |
-| message FER (CRC-8 + RS + AES), 4 msgs | — | **0 %** at 5 dB and at 2 dB |
+| KS p (IQ vs AWGN) | > 0.05 (want > 0.85) | **0.8646** |
+| kurtosis / entropy / circularity | 3.0 / >0.95 / <0.15 | 2.9907 / 0.9566 / 0.0107 |
+| PAPR dev / SCF / C42 / WVD | <3 dB / <3 / <0.3 / <3.7 | +0.009 dB / 1.0129 / −0.0048 / 1.0166 |
+| composite `Sc` | <0.20 | **0.1399** (8/8 domains pass) |
+| adversary, held-out fitted detector | 48–56 % | **55.90 %**, AUC 0.5858 |
+| field BER (sync + CFO + phase noise + DC + IQ) | <1 % | 3.05e-5 @6 dB · **0.0** @8,10 dB · 2.14e-3 @2 dB · 1.00e-2 @0 dB |
+| message FER (CRC-8 + RS + AES), 16 msgs/SNR | — | **0 %** for every SNR ≥ 2 dB; 25 % @0 dB |
+| `lpi_eval.py` exit code | 0 | **0** (6/6 gate checks PASS) |
+
+Two things that are easy to get wrong when quoting this table, both measured:
+
+* **The adversary number is a property of the detector's budget.** The same frozen
+  generator reads 55.90 % (AUC 0.586) with 400 fitting steps and **58.80 %**
+  (AUC 0.616) with 800 -- i.e. the 48–56 % target is met at the paper's budget and
+  missed at 2× it. Report the budget with the accuracy, or the number means nothing.
+* **FER resolution is 1/messages.** With the old `n_msg=4` the metric could only move
+  in 25 % steps, so "0 %" was barely a measurement; at 16 msgs/SNR it still comes out
+  0 % above 2 dB, which is now worth saying.
+
+`--gate-snr-min` (default 5 dB) is why the BER/FER rows read "worst in the band":
+the sweep reaches 1.00e-2 at 0 dB, and a gate that takes the worst over *whatever*
+SNR list you typed is measuring your command line, not the link. The full sweep is
+printed under the gate line and kept in the JSON either way.
 
 Reproduce with the two commands above; the definitions of each number (and the
 two conventions that change them by 25 points if you get them wrong — label
