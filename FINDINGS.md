@@ -166,6 +166,26 @@ detectors that could tell it apart, not merely against a scalar KS test.
   `decrypt_and_verify` always fails.
 * `nohup … &` inside some shells returns immediately but dies with the session —
   long runs need a real process manager (see `AUTOMATION.md`).
+* **A CLI flag that was used but never defined** (`lpi_eval.py` still wrote its
+  report under `if args.md:` while the `--md` definition had been dropped by an
+  earlier edit). Nothing in the test suite touches it, `--help` does not mention
+  it, and the failure only appears when a caller passes the flag — which was CI.
+  Two different exit codes from one cause: `--md x` → argparse
+  `unrecognized arguments` (exit 2), no `--md` → `AttributeError` (exit 1). Both
+  read as "the metric gate failed" in the Actions UI, so an afternoon went into
+  the wrong conclusion. Guarded now by
+  `tests/test_lpi_v4.py::test_cli_flags_are_all_defined`, which AST-diffs every
+  `args.<name>` against the `add_argument` dests of every entry point; it fails
+  when the flag is removed, which is how it was verified.
+* In a GitHub Actions step, relative paths resolve against `working-directory`,
+  not the repo root: `open("lpi_v4/run/ci_eval.json")` inside a step already
+  `cd`-ed into `lpi_v4` is a `FileNotFoundError` that looks like a bad metric.
+* `export_for_grc()` wrote `generator_lpi.pt`/`decoder_lpi.pt` **next to whatever
+  checkpoint was trained**, so a 6-epoch smoke test silently replaced the exports
+  the `.grc` flowgraphs and `tx_usrp.py` load (this was caught by `git status`
+  showing those two files modified after a CI rehearsal). It is now `--export-dir`,
+  and both workflows point it at a scratch folder; a run that means to feed the
+  radio still exports into `run/` by default.
 
 ## 8. Current state of every acceptance metric
 

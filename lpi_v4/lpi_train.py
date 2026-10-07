@@ -147,6 +147,12 @@ def main() -> None:
     ap.add_argument("--tb", default="runs/lpi_v4")
     ap.add_argument("--wandb", default="", help='e.g. "lpi-v4" to enable')
     ap.add_argument("--export-every", type=int, default=0)
+    ap.add_argument("--export-dir", default="",
+                    help="where generator_lpi.pt / decoder_lpi.pt / lpi_config.json are "
+                         "written (default: next to --out). Smoke tests should point this "
+                         "at a scratch folder -- export_for_grc() is called on every best "
+                         "epoch, so a 6-epoch run aimed at run/ci.pt would otherwise leave "
+                         "6-epoch TorchScript in run/, and the radio reads THAT folder.")
     ap.add_argument("--init", default="", help="warm-start G/D from this checkpoint")
     ap.add_argument("--d-stop-frac", type=float, default=0.6,
                     help="fraction of the run after which the wardens are FROZEN "
@@ -358,11 +364,12 @@ def main() -> None:
                                 generator=G.state_dict(), decoder=D.state_dict(),
                                 warden1=W1.state_dict(), warden2=W2.state_dict()),
                            args.out.replace(".pt", ".best.pt"))
-                export_for_grc(args.out.replace(".pt", ".best.pt"), device)
+                export_for_grc(args.out.replace(".pt", ".best.pt"), device,
+                                 args.export_dir or None)
                 save_config(cfg, args.out.replace(".pt", ".best.json"))
                 print(f"  [best] score {score:.1f} -> {args.out.replace('.pt', '.best.pt')}")
             if args.export_every and ep % args.export_every == 0:
-                export_for_grc(args.out, device)
+                export_for_grc(args.out, device, args.export_dir or None)
 
         print(f"\n[done] {args.epochs} epochs in {(time.time()-t0)/60:.1f} min")
         print(f"[done] best snapshot: {args.out.replace('.pt', '.best.pt')}")
@@ -426,6 +433,7 @@ def link_ber(G, D, cfg: LPIConfig, device, n_frames: int = 256, snr_db: float = 
 def export_for_grc(ckpt: str, device: str = "cpu", outdir: str | None = None) -> None:
     """TorchScript export for the GNU Radio Python blocks / the USRP scripts."""
     outdir = outdir or os.path.dirname(os.path.abspath(ckpt))
+    os.makedirs(outdir, exist_ok=True)
     ck = torch.load(ckpt, map_location=device, weights_only=False)
     cfg = LPIConfig(**{k: (tuple(v) if k == "snr_range" else v)
                        for k, v in ck.get("cfg", {}).items()})

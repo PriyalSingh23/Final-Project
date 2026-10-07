@@ -248,3 +248,41 @@ def test_trained_message_over_field_channel():
     assert res["n_frames"] >= 0.8 * nf, res
     assert res["ok"] is True, res
     assert res["text"] == msg * 12, res
+
+
+def test_cli_flags_are_all_defined():
+    """Every ``args.<name>`` an entry point reads must come from ``add_argument``.
+
+    A dropped flag is invisible to imports and to every other test here: it only
+    fires once somebody actually passes it.  That is exactly how the CI eval step
+    died -- ``lpi_eval.py`` still wrote its Markdown report behind ``if args.md:``
+    while the ``--md`` definition was gone, so any ``--md`` caller got
+    ``error: unrecognized arguments`` (exit 2) and any caller without it got an
+    ``AttributeError`` (exit 1), both of which look like a metric regression from
+    the outside.  Automated instead of re-learned by hand.
+    """
+    import ast
+
+    offenders = {}
+    for name in sorted(os.listdir(V4)):
+        if not (name.startswith("lpi_") or name.endswith("_usrp.py")):
+            continue
+        path = os.path.join(V4, name)
+        defined, used = set(), set()
+        for node in ast.walk(ast.parse(open(path).read())):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "add_argument"):
+                for a in node.args:
+                    if isinstance(a, ast.Constant) and isinstance(a.value, str) \
+                            and a.value.startswith("--"):
+                        defined.add(a.value[2:].replace("-", "_"))
+                for kw in node.keywords:
+                    if kw.arg == "dest" and isinstance(kw.value, ast.Constant):
+                        defined.add(kw.value.value)
+            elif (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                  and node.value.id.endswith("args")):
+                used.add(node.attr)
+        missing = sorted(used - defined)
+        if missing:
+            offenders[name] = missing
+    assert not offenders, f"args read but never defined: {offenders}"

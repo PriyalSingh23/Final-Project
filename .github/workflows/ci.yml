@@ -62,8 +62,11 @@ jobs:
       - name: train (short)
         working-directory: lpi_v4
         run: |
+          # --export-dir keeps the smoke model's TorchScript out of run/, which is
+          # where the .grc flowgraphs and tx/rx_usrp.py read the shipped exports from.
           python lpi_train.py --epochs 6 --steps 12 --batch 32 \
-              --out run/ci.pt --log run/ci.csv --tb "" 2>&1 | tee run/ci.log
+              --out run/ci.pt --log run/ci.csv --tb "" \
+              --export-dir run/ci_export 2>&1 | tee run/ci.log
       - name: link + message gate (this is the step that fails on a regression)
         working-directory: lpi_v4
         run: |
@@ -74,7 +77,8 @@ jobs:
               --out-json run/ci_eval.json --md run/ci_eval.md
           python - <<'PY'
           import json, sys
-          r = json.load(open("lpi_v4/run/ci_eval.json"))
+          # working-directory is lpi_v4, so this path is relative to that folder
+          r = json.load(open("run/ci_eval.json"))
           g = r["gate"]
           print(json.dumps(g, indent=1))
           # a 6-epoch CI model is not expected to hit the full field gate; it IS

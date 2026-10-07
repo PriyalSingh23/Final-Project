@@ -15,7 +15,9 @@ on:
         default: "40"
       eps:
         description: "dither fraction (stealth <-> BER knob)"
-        default: "0.16"
+        # 0.10 is the value the shipped checkpoint was measured with; larger dither
+        # buys KS headroom at the cost of BER (FINDINGS.md, section 4).
+        default: "0.10"
 
 permissions:
   contents: read
@@ -39,9 +41,14 @@ jobs:
         working-directory: lpi_v4
         run: |
           E=${{ github.event.inputs.epochs || '40' }}
-          EPS=${{ github.event.inputs.eps || '0.16' }}
+          EPS=${{ github.event.inputs.eps || '0.10' }}
+          # Loss weights are the measured defaults, NOT raised: FINDINGS.md section 4
+          # records that --w-adv 1.5+ pushed the adversary to 65-72 % and KS p down
+          # to ~0.0 without improving stealth, so a nightly run with them would look
+          # like a code regression every morning.
           python lpi_train.py --epochs "$E" --steps 24 --batch 48 --eps "$EPS" \
-              --w-adv 2.0 --w-cov 3.0 --out run/night.pt --log run/night.csv --tb "" \
+              --out run/night.pt --log run/night.csv --tb "" \
+              --export-dir run/night_export \
               2>&1 | tee run/night.log
       - name: evaluate (gate + honest fitted detector)
         working-directory: lpi_v4
@@ -90,9 +97,11 @@ jobs:
             lpi_v4/run/night_eval.json
             lpi_v4/run/night_eval.md
             lpi_v4/run/night.best.pt
-            lpi_v4/run/lpi_config.json
-            lpi_v4/run/generator_lpi.pt
-            lpi_v4/run/decoder_lpi.pt
+            lpi_v4/run/night.best.json
+            # the night's own TorchScript, in the scratch export dir (see --export-dir)
+            lpi_v4/run/night_export/generator_lpi.pt
+            lpi_v4/run/night_export/decoder_lpi.pt
+            lpi_v4/run/night_export/lpi_config.json
           retention-days: 30
           if-no-files-found: warn
       - name: open an issue only on a real regression

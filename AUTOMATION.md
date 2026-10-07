@@ -48,11 +48,18 @@ become either a flag on one of those five commands or a step in CI.
   `colab/`): installs CPU torch, runs `pytest -m "not slow"` on
   ubuntu+windows, then a 6-epoch training run and `lpi_eval` as a **metric gate**
   (it fails the build if the field BER, the message FER, the capture decode or
-  KS p regress). Artefacts: the epoch CSV, the log, `ci_eval.md`.
-* **`.github/workflows/nightly-train.yml`** (03:17 UTC): 40 epochs, full
-  `lpi_eval --fit-warden 2000`, compares against `metrics/last.json`, and opens
-  an issue *only* on a real regression. Includes the trained `.pt` + the exported
-  TorchScript as artefacts, so the nightly is a restore point.
+  KS p regress). Artefacts: the epoch CSV, the log, `ci_eval.md`. That 6-epoch run
+  passes `--no-fail` — a 6-epoch model's *own* warden has barely been
+  trained, so `lpi_eval`'s full-gate verdict is meaningless there; the step's
+  explicit hard subset is what fails the build. Its train also uses
+  `--export-dir run/ci_export`, because `run/` is where a real run puts the
+  TorchScript the radio loads.
+* **`.github/workflows/nightly-train.yml`** (03:17 UTC): 40 epochs at the measured
+  defaults (`--eps 0.10`, default loss weights — see FINDINGS §4 for why raising
+  `--w-adv` is a dead end), full `lpi_eval --fit-warden 2000 --no-fail`, compares
+  against `metrics/last.json`, and opens an issue *only* on a real regression.
+  Includes the trained `.pt` + that run's exported TorchScript as artefacts, so the
+  nightly is a restore point.
 * To make the issue-opening work, the workflow needs `issues: write` (already
   set) — no token needed. To have it *commit* `metrics/last.json` after a good
   night, add a `repository_dispatch`/push step with a PAT, or push it manually

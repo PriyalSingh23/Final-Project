@@ -408,6 +408,8 @@ def main():
                          "is unambiguous to +/-(fs/2/frame_period); larger offsets are "
                          "handled by rx_usrp.py --coarse, not by this benchmark)")
     ap.add_argument("--out-json", default="run/eval.json")
+    ap.add_argument("--md", default="",
+                    help="also write a human-readable Markdown report here")
     ap.add_argument("--no-fail", action="store_true",
                     help="always exit 0: print the gate but never fail the caller "
                          "(use in CI when a short run is not expected to pass it, and "

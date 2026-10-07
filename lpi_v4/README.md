@@ -30,13 +30,19 @@ disaster was possible only because two files each had their own idea.
 
 ```bash
 python -m pytest ../tests -q -m "not slow"      # framing + sync + crypto loopback
-python lpi_train.py --epochs 12 --steps 24 --batch 48 --out run/smoke.pt
-python lpi_eval.py --ckpt run/smoke.best.pt --frames 128 --snrs 2,5,8
+python lpi_train.py --epochs 12 --steps 24 --batch 48 --out run/smoke.pt \
+    --export-dir run/smoke_export
+python lpi_eval.py --ckpt run/smoke.best.pt --frames 128 --snrs 2,5,8 --no-fail
 python rx_usrp.py --selftest                    # TX -> channel -> RX -> text
 python lpi_grc.py                               # the GRC blocks, without GRC
 ```
 
-`lpi_eval.py` exits non-zero unless the whole gate passes, so it is usable in CI.
+`--export-dir` matters for a throwaway run: without it the TorchScript exports land
+in `run/`, which is the folder the `.grc` flowgraphs and `tx_usrp.py` read the
+*shipped* model from. `--no-fail` prints the gate but always exits 0, which is what
+you want from a 12-epoch model (and from a Colab cell, where a non-zero exit kills
+the rest of the notebook). `lpi_eval.py` exits non-zero only when you leave it off —
+that is the mode CI uses once the model is expected to pass.
 
 ## Train for the paper numbers
 
