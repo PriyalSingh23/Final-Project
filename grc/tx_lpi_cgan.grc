@@ -36,8 +36,8 @@ blocks:
 - name: samp_rate
   id: variable
   parameters:
-    comment: '32 kS/s -> 62.5 covert frames/s (512 samples each)'
-    value: '32000'
+    comment: '1 MS/s covert streaming'
+    value: '1000000'
   states:
     bus_sink: false
     bus_source: false
@@ -48,8 +48,8 @@ blocks:
 - name: center_freq
   id: variable
   parameters:
-    comment: ''
-    value: '750000'
+    comment: '750 MHz RF Carrier'
+    value: '750000000'
   states:
     bus_sink: false
     bus_source: false
@@ -61,7 +61,7 @@ blocks:
   id: variable
   parameters:
     comment: ''
-    value: '10'
+    value: '25'
   states:
     bus_sink: false
     bus_source: false

@@ -68,10 +68,10 @@ class tx_lpi_cgan(gr.top_block, Qt.QWidget):
         ##################################################
         # Variables
         ##################################################
-        self.tx_gain = tx_gain = 10
-        self.samp_rate = samp_rate = 32000
+        self.tx_gain = tx_gain = 25
+        self.samp_rate = samp_rate = 1000000
         self.frame_size = frame_size = 512
-        self.center_freq = center_freq = 750000
+        self.center_freq = center_freq = 750000000
 
         ##################################################
         # Blocks

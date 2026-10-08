@@ -66,17 +66,17 @@ class rx_lpi_cgan(gr.top_block, Qt.QWidget):
         ##################################################
         # Variables
         ##################################################
-        self.samp_rate = samp_rate = 32000
-        self.rx_gain = rx_gain = 30
+        self.samp_rate = samp_rate = 1000000
+        self.rx_gain = rx_gain = 35
         self.frame_size = frame_size = 512
-        self.center_freq = center_freq = 750000
+        self.center_freq = center_freq = 750000000
 
         ##################################################
         # Blocks
         ##################################################
 
         self.uhd_usrp_source_0 = uhd.usrp_source(
-            ",".join(("", '', "master_clock_rate=30.72e6")),
+            ",".join(("", '')),
             uhd.stream_args(
                 cpu_format="fc32",
                 args='',
