@@ -1,0 +1,10 @@
+{
+ "exported_from": "lpi_v4.best.pt",
+ "sha256": "0e8e515355be8bffb48fc27ad63b8e4a4aead57b72d2b5ad969d58aeb1c0887c",
+ "epoch": 16,
+ "files": [
+  "generator_lpi.pt",
+  "decoder_lpi.pt",
+  "lpi_config.json"
+ ]
+}

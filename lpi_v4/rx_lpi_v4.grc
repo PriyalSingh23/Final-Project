@@ -1,0 +1,132 @@
+options:
+  parameters: {author: PriyalSingh23 / ShadowComm, catch_exceptions: 'True', category: '[GRC Hier Blocks]', cmake_opt: '', comment: '', copyright: '', description: 'USRP IQ -> keyed-pilot sync (timing/CFO/phase) -> MF+ZF decode -> RS(42,34) + CRC-8 + AES -> text.  Prints to the console GRC runs in.', gen_cmake: 'On', gen_linking: dynamic, generate_options: qt_gui, hier_block_src_path: '.:', id: rx_lpi_v4, max_nouts: '0', output_language: python, placement: '(0,0)', qt_qss_theme: '', realtime_scheduling: '', run: 'True', run_command: '{python} -u {filename}', run_options: prompt, sizing_mode: fixed, thread_safe_setters: '', title: ShadowComm LPI v4 Receiver, window_size: '(1100,700)'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+blocks:
+- name: samp_rate
+  id: variable
+  parameters: {alias: '', comment: MUST equal the TX rate (lpi_config.json), value: '245760'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+- name: center_freq
+  id: variable
+  parameters: {alias: '', comment: same as TX, value: 2.484e9}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+- name: rx_gain
+  id: variable
+  parameters: {alias: '', comment: start ~30 dB; the LPI signal is *below* the noise floor, value: '30'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+- name: lpi_dir
+  id: variable
+  parameters: {alias: '', comment: '', value: '"/home/user/Final-Project/lpi_v4"'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+- name: ckpt
+  id: variable
+  parameters: {alias: '', comment: '', value: '"/home/user/Final-Project/lpi_v4/run/lpi_v4.best.pt"'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+- name: cfg_json
+  id: variable
+  parameters: {alias: '', comment: '', value: '"/home/user/Final-Project/lpi_v4/run/lpi_v4.best.json"'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+- name: session_key
+  id: variable
+  parameters: {alias: '', comment: '', value: '"SESSION-KEY"'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+- name: capture_file
+  id: variable
+  parameters: {alias: '', comment: fill in a .cs16/.fc32 file to replay a recording instead of the radio, value: '""'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+- name: out_file
+  id: variable
+  parameters: {alias: '', comment: one line per decoded burst, value: '"lpi_rx.log"'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+- name: blocks_file_source_0
+  id: blocks_file_source
+  parameters: {alias: '', comment: OPTIONAL replay input -- leave the path empty and use the UHD source (double-click this block and set file= to replay), file: '""', length: '0', maxoutbuf: '0', minoutbuf: '0', repeat: 'False', type: complex, vlen: '1'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [40, 200]
+    rotation: 0
+    state: disabled
+- name: uhd_usrp_source_0
+  id: uhd_usrp_source
+  parameters: {affinity: '', alias: '', ant0: RX2, bw0: 2e5, dc_offs_0: '[0]', dc_offset_mode0: '0', gain0: '${rx_gain}', gain_type0: default, gain_mode0: Manual, iq_imbal_0: '[0]', iq_balance_mode0: '0', lo_source0: internal, maxoutbuf: '0', minoutbuf: '0', nchan: '1', num_mboards: '1', otw: '', radio0: '["addr=\"\""]', rx_freq0: '${center_freq}', rate0: '${samp_rate}', rx_agc0: Disabled, samp_rate: '${samp_rate}', sd_spec0: '', show_lo_controls: 'False', stream_args: '', stream_chans: '[]', time_source0: '', trigger_rate: 1e3, tune_mame0: Manual, type: fc32}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [40, 400]
+    rotation: 0
+    state: enabled
+- name: epy_block_0
+  id: epy_block
+  parameters: {_source: "import numpy as np\nfrom gnuradio import gr\nimport os, sys\nLPI_DIR = os.path.expanduser(lpi_dir)\nif LPI_DIR not in sys.path:\n    sys.path.insert(0, LPI_DIR)\nimport lpi_grc as _g\n\n\nclass lpi_rx(gr.sync_block):\n    \"\"\"IQ stream -> keyed pilot sync -> RS/AES -> text (printed + file).\"\"\"\n\n    def __init__(self, lpi_dir=\"\", ckpt=\"\", cfg_json=\"\", key=\"SESSION-KEY\",\n                 mode=\"ctr\", out_file=\"\", verbose=True, window=0):\n        core = _g.RxCore(ckpt, cfg_json, key, mode, window, \"cpu\", verbose, out_file)\n        gr.sync_block.__init__(self, name=\"lpi_rx\", in_sig=[np.complex64], out_sig=[])\n        self.core = core\n        self.set_relative_rate(1.0)\n\n    def work(self, input_items, output_items):\n        return self.core.work(input_items[0])\n", affinity: '', alias: '', comment: sync + decode + CRC text (prints to stdout), ckpt: '${ckpt}', cfg_json: '${cfg_json}', key: '${session_key}', lpi_dir: '${lpi_dir}', maxoutbuf: '0', minoutbuf: '0', mode: '"ctr"', out_file: '${out_file}', verbose: 'True', window: '0'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [320, 400]
+    rotation: 0
+    state: enabled
+connections:
+- [uhd_usrp_source_0, '0', epy_block_0, '0']

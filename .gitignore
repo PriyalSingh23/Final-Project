@@ -1,0 +1,24 @@
+
+# --- lpi_v4 run artefacts (keep the canonical checkpoint + report) ----------
+lpi_v4/run/*
+!lpi_v4/run/lpi_v4.best.pt
+!lpi_v4/run/lpi_v4.best.json
+!lpi_v4/run/generator_lpi.pt
+!lpi_v4/run/decoder_lpi.pt
+!lpi_v4/run/lpi_config.json
+!lpi_v4/run/export_manifest.json
+!lpi_v4/run/lpi_v4.csv
+!lpi_v4/run/eval.json
+!lpi_v4/run/eval.md
+!lpi_v4/run/eval.tex
+*.npz
+*.cs16
+*.fc32
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+runs/
+wandb/
+*.bak.*
+
+*.pdf.txt

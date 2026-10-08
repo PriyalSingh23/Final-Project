@@ -1,0 +1,125 @@
+name: lpi-v4-nightly
+
+# A real (if short) training run every night, with the full metric report as an
+# artefact, and an issue opened only when a number that used to pass stops passing.
+# This is the "automation" that replaces "I ran it locally on Tuesday": the paper
+# tables become generated, reviewable output.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"          # 03:17 UTC daily
+  workflow_dispatch:
+    inputs:
+      epochs:
+        description: "epochs for the nightly run"
+        default: "40"
+      eps:
+        description: "dither fraction (stealth <-> BER knob)"
+        # 0.10 is the value the shipped checkpoint was measured with; larger dither
+        # buys KS headroom at the cost of BER (FINDINGS.md, section 4).
+        default: "0.10"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          pip install numpy scipy pyyaml reedsolo pycryptodome
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: train
+        working-directory: lpi_v4
+        run: |
+          E=${{ github.event.inputs.epochs || '40' }}
+          EPS=${{ github.event.inputs.eps || '0.10' }}
+          # Loss weights are the measured defaults, NOT raised: FINDINGS.md section 4
+          # records that --w-adv 1.5+ pushed the adversary to 65-72 % and KS p down
+          # to ~0.0 without improving stealth, so a nightly run with them would look
+          # like a code regression every morning.
+          python lpi_train.py --epochs "$E" --steps 24 --batch 48 --eps "$EPS" \
+              --out run/night.pt --log run/night.csv --tb "" \
+              --export-dir run/night_export \
+              2>&1 | tee run/night.log
+      - name: evaluate (gate + honest fitted detector)
+        working-directory: lpi_v4
+        run: |
+          python lpi_eval.py --ckpt run/night.best.pt --frames 512 \
+              --snrs 0,2,4,6,8,10 --fit-warden 2000 --no-fail \
+              --out-json run/night_eval.json --md run/night_eval.md \
+              --latex run/night_eval.tex
+          # --no-fail so that the comparison step (and the issue it opens) always
+          # runs; the gate verdict is read from the JSON, not the exit code.
+      - name: compare with the last recorded run
+        working-directory: lpi_v4
+        id: cmp
+        run: |
+          python - <<'PY' | tee -a "$GITHUB_OUTPUT"
+          import json, os, sys
+          new = json.load(open("run/night_eval.json"))
+          ref_path = "../metrics/last.json"
+          keys = [("block_stealth", "ks_p"), ("block_stealth", "kurt"),
+                  ("block_stealth", "circ"), ("block_stealth", "Sc")]
+          regress = []
+          if os.path.exists(ref_path):
+              ref = json.load(open(ref_path))
+              for b, k in keys:
+                  try:
+                      a, c = new[b][k], ref[b][k]
+                  except Exception:
+                      continue
+                  if b == "block_stealth" and k == "ks_p" and a < max(0.05, 0.5 * c):
+                      regress.append(f"{k}: {c:.3f} -> {a:.3f}")
+                  if b == "block_stealth" and k == "Sc" and a > 1.25 * c:
+                      regress.append(f"{k}: {c:.3f} -> {a:.3f}")
+          worst = max(new["block_link"].values(), key=lambda r: r["field"])
+          if worst["field"] > 0.01:
+              regress.append(f"field BER {worst['field']:.2e} > 1e-2")
+          print("regressions=%d" % len(regress))
+          print("detail=" + "; ".join(regress))
+          print("failed=" + ("true" if regress else "false"))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lpi-v4-nightly
+          path: |
+            lpi_v4/run/night.csv
+            lpi_v4/run/night.log
+            lpi_v4/run/night_eval.json
+            lpi_v4/run/night_eval.md
+            lpi_v4/run/night_eval.tex
+            lpi_v4/run/night.best.pt
+            lpi_v4/run/night.best.json
+            # the night's own TorchScript, in the scratch export dir (see --export-dir)
+            lpi_v4/run/night_export/generator_lpi.pt
+            lpi_v4/run/night_export/decoder_lpi.pt
+            lpi_v4/run/night_export/lpi_config.json
+          retention-days: 30
+          if-no-files-found: warn
+      - name: open an issue only on a real regression
+        if: steps.cmp.outputs.failed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "### Nightly LPI metric regression"
+            echo
+            echo '```'
+            echo "${{ steps.cmp.outputs.detail }}"
+            echo '```'
+            echo
+            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "See the `lpi-v4-nightly` artefact for the full table."
+          } > body.md
+          gh issue create --title "nightly: LPI metrics regressed ($(date -u +%F))" \
+              --body-file body.md --label "metrics" || true

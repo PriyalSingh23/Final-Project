@@ -1,0 +1,178 @@
+options:
+  parameters: {author: PriyalSingh23 / ShadowComm, catch_exceptions: 'True', category: '[GRC Hier Blocks]', cmake_opt: '', comment: '', copyright: '', description: 'Message -> AES/RS -> keyed spread frames -> CGAN waveform -> USRP. Needs the lpi_v4 folder (lpi_grc.py, lpi_core.py, exported .pt).', gen_cmake: 'On', gen_linking: dynamic, generate_options: qt_gui, hier_block_src_path: '.:', id: tx_lpi_v4, max_nouts: '0', output_language: python, placement: '(0,0)', qt_qss_theme: '', realtime_scheduling: '', run: 'True', run_command: '{python} -u {filename}', run_options: prompt, sizing_mode: fixed, thread_safe_setters: '', title: ShadowComm LPI v4 Transmitter, window_size: '(1100,700)'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+blocks:
+- name: samp_rate
+  id: variable
+  parameters: {alias: '', comment: B210 minimum is ~208.3 kS/s; 245760 = 61.44 MHz/250 (exact integer), value: '245760'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+- name: center_freq
+  id: variable
+  parameters: {alias: '', comment: 'same on TX and RX; the LPI gain is in the waveform, not in a low carrier', value: 2.484e9}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+- name: tx_gain
+  id: variable
+  parameters: {alias: '', comment: start at 0 dB and raise only until the RX locks, value: '0'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+- name: lpi_dir
+  id: variable
+  parameters: {alias: '', comment: folder containing lpi_core.py / lpi_grc.py / the exported weights, value: '"/home/user/Final-Project/lpi_v4"'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+- name: tx_bits_file
+  id: variable
+  parameters: {alias: '', comment: raw uint8 file; each byte becomes 8 payload bits (see make_bits_file.py), value: '"/tmp/lpi_bits.dat"'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+- name: ckpt
+  id: variable
+  parameters: {alias: '', comment: '', value: '"/home/user/Final-Project/lpi_v4/run/lpi_v4.best.pt"'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+- name: cfg_json
+  id: variable
+  parameters: {alias: '', comment: '', value: '"/home/user/Final-Project/lpi_v4/run/lpi_v4.best.json"'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+- name: session_key
+  id: variable
+  parameters: {alias: '', comment: must equal the RX key, value: '"SESSION-KEY"'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+- name: blocks_file_source_0
+  id: blocks_file_source
+  parameters: {alias: '', comment: packed bytes -> 8 bits each, file: '${tx_bits_file}', length: '0', maxoutbuf: '0', minoutbuf: '0', repeat: 'True', type: byte, vlen: '1'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [40, 200]
+    rotation: 0
+    state: enabled
+- name: blocks_unpack_k_bits_bb_0
+  id: blocks_unpack_k_bits_bb
+  parameters: {alias: '', comment: '', k: '8', maxoutbuf: '0', minoutbuf: '0'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [260, 200]
+    rotation: 0
+    state: enabled
+- name: digital_chunks_to_symbols_bc_0
+  id: digital_chunks_to_symbols_bc
+  parameters: {alias: '', comment: '0 -> +1, 1 -> -1 (the block thresholds the real part, so either mapping decodes)', constellation: '[-1, 1]', dim: '1', label: '', maxoutbuf: '0', minoutbuf: '0', num_rows: '1', num_ports: '1', precision: '32', symbol_table: ''}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [470, 200]
+    rotation: 0
+    state: enabled
+- name: blocks_stream_to_vector_0
+  id: blocks_stream_to_vector
+  parameters: {alias: '', comment: one frame = 128 symbols, maxoutbuf: '0', minoutbuf: '0', num_items: '128', type: complex, vlen: '1'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [680, 200]
+    rotation: 0
+    state: enabled
+- name: epy_block_0
+  id: epy_block
+  parameters: {_source: "import numpy as np\nfrom gnuradio import gr\nimport os, sys\nLPI_DIR = os.path.expanduser(lpi_dir)\nif LPI_DIR not in sys.path:\n    sys.path.insert(0, LPI_DIR)\nimport lpi_grc as _g\n\n\nclass lpi_tx(gr.sync_block):\n    \"\"\"BPSK symbol vector (n_bits) -> LPI IQ frame (pilot + spread payload).\"\"\"\n\n    def __init__(self, lpi_dir=\"\", ckpt=\"\", cfg_json=\"\", key=\"SESSION-KEY\", amp=0.05):\n        core = _g.TxCore(ckpt, cfg_json, key, amp)\n        gr.sync_block.__init__(self, name=\"lpi_tx\",\n                               in_sig=[(np.complex64, core.in_len())],\n                               out_sig=[(np.complex64, core.out_len())])\n        self.core = core\n\n    def work(self, input_items, output_items):\n        return self.core.work(input_items[0], output_items[0])\n", affinity: '', alias: '', comment: LPI v4 keyed spread + pilot framing, amp: '0.05', ckpt: '${ckpt}', cfg_json: '${cfg_json}', key: '${session_key}', lpi_dir: '${lpi_dir}', maxoutbuf: '0', minoutbuf: '0'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [880, 200]
+    rotation: 0
+    state: enabled
+- name: blocks_vector_to_stream_0
+  id: blocks_vector_to_stream
+  parameters: {alias: '', comment: 576 samples/frame = 64 pilot + 512 payload, maxoutbuf: '0', minoutbuf: '0', num_items: '576', type: complex, vlen: '1'}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1090, 200]
+    rotation: 0
+    state: enabled
+- name: uhd_usrp_sink_0
+  id: uhd_usrp_sink
+  parameters: {affinity: '', alias: '', ant0: TX/RX, bw0: '0', center_freq0: '${center_freq}', clock_rate: 0e0, clock_source0: '', comment: '', dev_addr: '""', dev_args: '', gain0: '${tx_gain}', gain_type0: default, len_tag_name: '""', lo_export0: 'False', lo_source0: internal, maxoutbuf: '0', minoutbuf: '0', nchan: '1', num_mboards: '1', otw: '', samp_rate: '${samp_rate}', sd_spec0: '', show_lo_controls: 'False', start_time: '-1.0', stream_args: '', stream_chans: '[]', sync: none, time_source0: '', type: fc32}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1290, 200]
+    rotation: 0
+    state: enabled
+- name: qtgui_time_sink_x_0
+  id: qtgui_time_sink_x
+  parameters: {alias: '', autoscale: 'True', axislabels: '[''Time (s)'', ''Amplitude'']', comment: the waveform should *look* like noise on the scope, ctrlpanel: 'False', entags: 'True', grid: 'True', gui_hint: '', label1: LPI IQ (I), label2: LPI IQ (Q), label3: '', label4: '', legend: 'True', maxoutbuf: '0', minoutbuf: '0', name: LPI v4 TX, npoints: '2048', srate: '${samp_rate}', tr_chan: '0', tr_delay: '0', tr_level: '0.0', tr_mode: tr_auto, tr_out_skipped: 'False', tr_tags: 'False', type: complex, update_time: '0.10', width: '800', yaxislabel: Amplitude}
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1290, 400]
+    rotation: 0
+    state: enabled
+connections:
+- [blocks_file_source_0, '0', blocks_unpack_k_bits_bb_0, '0']
+- [blocks_unpack_k_bits_bb_0, '0', digital_chunks_to_symbols_bc_0, '0']
+- [digital_chunks_to_symbols_bc_0, '0', blocks_stream_to_vector_0, '0']
+- [blocks_stream_to_vector_0, '0', epy_block_0, '0']
+- [epy_block_0, '0', blocks_vector_to_stream_0, '0']
+- [blocks_vector_to_stream_0, '0', uhd_usrp_sink_0, '0']
+- [blocks_vector_to_stream_0, '0', qtgui_time_sink_x_0, '0']
