@@ -50,8 +50,13 @@ A p-value is sample-size dependent, and one CNN is only one detector. Passing th
 | `app.py`, `index.html` | Flask/Socket.IO offline demo and browser UI |
 | `generator_lpi.pt`, `decoder_lpi.pt` | Deployed TorchScript models |
 | `lpi_checkpoint.pt` | Selected training checkpoint |
-| `tx_lpi_cgan.grc`, `rx_lpi_cgan.grc` | Separate GNU Radio flowgraphs; hardware behavior not verified here |
+| `tx_lpi_cgan.grc`, `rx_lpi_cgan.grc` | GNU Radio lab scaffolds; TX disabled by default; hardware behavior not verified |
+| `GRC_SETUP.md` | Stepwise setup, safety gate, known sync blockers, and test sequence |
 | `tests/` | Flask/API integration smoke tests |
+
+## GNU Radio / USRP
+
+The repository-root flowgraphs are lab scaffolds, not a ready-to-radiate link. Read [`GRC_SETUP.md`](GRC_SETUP.md) for the model block interfaces, local path configuration, TX-disabled default, hardware-specific settings, and required frame-synchronization work. Do not transmit using the placeholder frequency or gains; no OTA link has been validated.
 
 ## Install
 

@@ -6,7 +6,7 @@ options:
     cmake_opt: ''
     comment: ''
     copyright: ''
-    description: LPI-CGAN Receiver (raw capture + inline normalized decode) + USRP
+    description: CGAN RX lab scaffold; requires external frame/carrier synchronization
     gen_cmake: 'On'
     gen_linking: dynamic
     generate_options: qt_gui
@@ -48,8 +48,8 @@ blocks:
 - name: center_freq
   id: variable
   parameters:
-    comment: ''
-    value: '750000'
+    comment: 'UNSET: enter an authorized frequency supported by your exact USRP before running'
+    value: '0'
   states:
     bus_sink: false
     bus_source: false
@@ -61,7 +61,7 @@ blocks:
   id: variable
   parameters:
     comment: ''
-    value: '30'
+    value: '0'
   states:
     bus_sink: false
     bus_source: false
@@ -130,8 +130,8 @@ blocks:
     affinity: ''
     alias: ''
     append: 'False'
-    comment: RAW baseband capture - feed ota_verify.py for offline alignment + BER + KS field test
-    file: C:\\Users\\yasht\\Desktop\\LPI_CGAN\\rx_raw.fc32
+    comment: Raw capture for offline inspection; no synchronization or validated OTA assessment
+    file: rx_raw.fc32
     type: complex
     unbuffered: 'False'
     vlen: '1'
@@ -163,13 +163,15 @@ blocks:
 - name: epy_block_0
   id: epy_block
   parameters:
-    _source: "import numpy as np\nfrom gnuradio import gr\n\nclass cgan_decoder_block(gr.sync_block):\n    def __init__(self, model_path='C:/Users/yasht/Desktop/LPI_CGAN/decoder_lpi.pt'):\n        gr.sync_block.__init__(self, name='CGAN_LPI_Decoder', in_sig=[(np.complex64, 512)], out_sig=[(np.complex64, 256)])\n        import torch\n        self.torch = torch\n        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'\n        self.model = torch.jit.load(model_path, map_location=self.device)\n        self.model.eval()\n        self.gpu_input = torch.zeros(1, 2, 512, dtype=torch.float32, device=self.device)\n        print(f'[CGAN Dec] Loaded on {self.device}')\n\n    def work(self, input_items, output_items):\n        in0 = input_items[0]\n        out = output_items[0]\n        for i in range(len(in0)):\n            frame = in0[i]\n            # per-frame + PER-CHANNEL normalization: decoder was trained on\n            # zero-mean, unit-power frames; over-the-air gain is arbitrary\n            # and a complex DC offset has DIFFERENT I and Q components, so\n            # each channel's mean must be removed separately\n            v = np.concatenate([frame.real, frame.imag]).astype(np.float32)\n            v[:512] -= v[:512].mean()\n            v[512:] -= v[512:].mean()\n            v = v / np.sqrt((v * v).mean() + 1e-8)\n            self.gpu_input[0, 0, :] = self.torch.from_numpy(v[:512])\n            self.gpu_input[0, 1, :] = self.torch.from_numpy(v[512:])\n            with self.torch.no_grad():\n                b_hat = self.model(self.gpu_input).cpu().numpy()[0]\n            symbols = np.where(b_hat > 0.5, 1.0, -1.0).astype(np.complex64)\n            out[i] = symbols\n        return len(in0)\n"
+    _source: "import numpy as np\nfrom gnuradio import gr\n\nclass cgan_decoder_block(gr.sync_block):\n    def __init__(self, model_path='decoder_lpi.pt', remove_dc=False, normalize_rms=False):\n        gr.sync_block.__init__(self, name='CGAN_LPI_Decoder', in_sig=[(np.complex64, 512)], out_sig=[(np.complex64, 256)])\n        import torch\n        self.torch = torch\n        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'\n        self.model = torch.jit.load(model_path, map_location=self.device).eval()\n        self.remove_dc = bool(remove_dc)\n        self.normalize_rms = bool(normalize_rms)\n        print(f'[CGAN Dec] Loaded on {self.device}; remove_dc={self.remove_dc}; normalize_rms={self.normalize_rms}')\n\n    def work(self, input_items, output_items):\n        frames = input_items[0]\n        out = output_items[0]\n        if len(frames) == 0:\n            return 0\n        iq = np.stack((frames.real, frames.imag), axis=1).astype(np.float32, copy=False)\n        if self.remove_dc:\n            iq = iq - iq.mean(axis=2, keepdims=True)\n        if self.normalize_rms:\n            rms = np.sqrt(np.mean(iq * iq, axis=(1, 2), keepdims=True) + 1e-8)\n            iq = iq / rms\n        tensor = self.torch.from_numpy(np.ascontiguousarray(iq)).to(self.device)\n        with self.torch.inference_mode():\n            probabilities = self.model(tensor).cpu().numpy()\n        out[:] = np.where(probabilities > 0.5, 1.0, -1.0).astype(np.complex64)\n        return len(frames)\n"
     affinity: ''
     alias: ''
-    comment: CGAN Decoder (with per-frame normalization)
+    comment: Decoder only; no preamble/frame/CFO/phase synchronization is implemented
     maxoutbuf: '0'
     minoutbuf: '0'
-    model_path: C:/Users/yasht/Desktop/LPI_CGAN/decoder_lpi.pt
+    model_path: decoder_lpi.pt
+    remove_dc: 'False'
+    normalize_rms: 'False'
   states:
     bus_sink: false
     bus_source: false
@@ -201,8 +203,8 @@ blocks:
     affinity: ''
     alias: ''
     append: 'False'
-    comment: Inline-decoded symbols (pre-alignment - use rx_raw.fc32 + ota_verify.py for the real BER)
-    file: C:\\Users\\yasht\\Desktop\\LPI_CGAN\\recovered_symbols.fc32
+    comment: Decoder output; graph assumes exact 512-sample frame alignment
+    file: recovered_symbols.fc32
     type: complex
     unbuffered: 'False'
     vlen: '1'
