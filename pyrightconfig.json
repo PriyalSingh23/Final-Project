@@ -1,0 +1,12 @@
+{
+  "include": [
+    "."
+  ],
+  "pythonPath": "C:\\Users\\gspra\\radioconda\\python.exe",
+  "extraPaths": [
+    "C:\\Users\\gspra\\radioconda\\Lib\\site-packages",
+    "c:\\Users\\gspra\\OneDrive\\Desktop\\LPI_CGAN"
+  ],
+  "pythonVersion": "3.12",
+  "pythonPlatform": "Windows"
+}
