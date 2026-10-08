@@ -28,45 +28,52 @@ options:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [8, 8]
+    coordinate:
+    - 8
+    - 8
     rotation: 0
     state: enabled
-
 blocks:
 - name: samp_rate
   id: variable
   parameters:
-    comment: '32 kS/s -> 62.5 covert frames/s (512 samples each)'
-    value: '32000'
+    comment: 1 MS/s covert streaming
+    value: '1000000'
   states:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [200, 12]
+    coordinate:
+    - 200
+    - 12
     rotation: 0
     state: enabled
 - name: center_freq
   id: variable
   parameters:
-    comment: ''
-    value: '750000'
+    comment: 750 MHz RF Carrier
+    value: '750000000'
   states:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [400, 12]
+    coordinate:
+    - 400
+    - 12
     rotation: 0
     state: enabled
 - name: tx_gain
   id: variable
   parameters:
     comment: ''
-    value: '10'
+    value: '25'
   states:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [600, 12]
+    coordinate:
+    - 600
+    - 12
     rotation: 0
     state: enabled
 - name: frame_size
@@ -78,7 +85,9 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [800, 12]
+    coordinate:
+    - 800
+    - 12
     rotation: 0
     state: enabled
 - name: blocks_file_source_0
@@ -88,7 +97,7 @@ blocks:
     alias: ''
     begin_tag: pmt.PMT_NIL
     comment: Ground-truth message (bits repeat)
-    file: C:\\Users\\yasht\\Desktop\\LPI_CGAN\\test_message.txt
+    file: C:\\Users\\gspra\\OneDrive\\Desktop\\LPI_CGAN\\test_message.txt
     length: '0'
     maxoutbuf: '0'
     minoutbuf: '0'
@@ -100,7 +109,9 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [88, 304]
+    coordinate:
+    - 88
+    - 304
     rotation: 0
     state: enabled
 - name: blocks_unpack_k_bits_bb_0
@@ -116,7 +127,9 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [304, 304]
+    coordinate:
+    - 304
+    - 304
     rotation: 0
     state: enabled
 - name: blocks_file_sink_bits
@@ -126,7 +139,7 @@ blocks:
     alias: ''
     append: 'False'
     comment: Ground-truth bit stream (MSB-first unpacked bytes) for offline BER
-    file: C:\\Users\\yasht\\Desktop\\LPI_CGAN\\tx_bits.uint8
+    file: C:\\Users\\gspra\\OneDrive\\Desktop\\LPI_CGAN\\tx_bits.uint8
     type: byte
     unbuffered: 'False'
     vlen: '1'
@@ -134,7 +147,9 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [304, 480]
+    coordinate:
+    - 304
+    - 480
     rotation: 0
     state: enabled
 - name: digital_chunks_to_symbols_xx_0
@@ -154,7 +169,9 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [520, 304]
+    coordinate:
+    - 520
+    - 304
     rotation: 0
     state: enabled
 - name: blocks_stream_to_vector_0
@@ -172,25 +189,76 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [736, 304]
+    coordinate:
+    - 736
+    - 304
     rotation: 0
     state: enabled
 - name: epy_block_0
   id: epy_block
   parameters:
-    _source: "import numpy as np\nfrom gnuradio import gr\n\nclass cgan_generator_block(gr.sync_block):\n    def __init__(self, model_path='C:/Users/yasht/Desktop/LPI_CGAN/generator_lpi.pt', gain_factor=0.35):\n        gr.sync_block.__init__(self, name='CGAN_LPI_Generator', in_sig=[(np.complex64, 256)], out_sig=[(np.complex64, 512)])\n        import torch\n        self.torch = torch\n        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'\n        self.model = torch.jit.load(model_path, map_location=self.device)\n        self.model.eval()\n        self.gain = gain_factor\n        self.gpu_noise = torch.zeros(1, 64, dtype=torch.float32, device=self.device)\n        self.b_tensor = torch.zeros(1, 256, dtype=torch.float32, device=self.device)\n        print(f'[CGAN Gen] Loaded on {self.device}')\n\n    def work(self, input_items, output_items):\n        in0 = input_items[0]\n        out = output_items[0]\n        for i in range(len(in0)):\n            frame = in0[i]\n            self.b_tensor[0, :] = self.torch.from_numpy(frame.real.astype(np.float32))\n            self.gpu_noise.normal_(mean=0, std=1)\n            with self.torch.no_grad():\n                covert = self.model(self.gpu_noise, self.b_tensor)\n            c_np = covert.cpu().numpy()[0]\n            out[i] = (c_np[0, :] + 1j * c_np[1, :]).astype(np.complex64) * self.gain\n        return len(in0)\n"
+    _source_code: "import os\nimport sys\nimport numpy as np\n\n# Ensure PyTorch and\
+      \ project modules are accessible across all conda environments\nfor _extra_path\
+      \ in [\n    r\"C:\\Users\\gspra\\radioconda\\Lib\\site-packages\",\n    r\"\
+      C:\\Users\\gspra\\OneDrive\\Desktop\\LPI_CGAN\",\n    os.path.abspath(os.path.join(os.path.dirname(__file__),\
+      \ \"..\")) if \"__file__\" in globals() else \"\",\n]:\n    if _extra_path and\
+      \ os.path.exists(_extra_path) and _extra_path not in sys.path:\n        sys.path.insert(0,\
+      \ _extra_path)\n\nfrom gnuradio import gr\n\n\nclass cgan_generator_block(gr.sync_block):\n\
+      \    \"\"\"CGAN Covert LPI Signal Generator.\n    Accepts vectors of 256 BPSK\
+      \ symbols and synthesizes 512 complex Gaussian covert baseband samples.\n  \
+      \  \"\"\"\n\n    def __init__(self, model_path=\"generator_lpi.pt\", gain_factor=0.35):\n\
+      \        gr.sync_block.__init__(\n            self,\n            name=\"CGAN_LPI_Generator\"\
+      ,\n            in_sig=[(np.complex64, 256)],\n            out_sig=[(np.complex64,\
+      \ 512)],\n        )\n        self.model_path = str(model_path)\n        self.gain_factor\
+      \ = float(gain_factor)\n        self.torch = None\n        self.model = None\n\
+      \        self.device = \"cpu\"\n        self.gpu_noise = None\n        self.b_tensor\
+      \ = None\n        self._load_model()\n\n    def _load_model(self):\n       \
+      \ try:\n            import torch\n            self.torch = torch\n         \
+      \   self.device = \"cpu\"\n            raw_path = self.model_path.strip(\"'\\\
+      \"\")\n            resolved_path = None\n            candidates = [\n      \
+      \          raw_path,\n                os.path.join(r\"C:\\Users\\gspra\\OneDrive\\\
+      Desktop\\LPI_CGAN\", raw_path),\n                os.path.join(r\"C:\\Users\\\
+      gspra\\OneDrive\\Desktop\\LPI_CGAN\", \"generator_lpi.pt\"),\n             \
+      \   os.path.join(os.path.dirname(__file__), \"generator_lpi.pt\") if \"__file__\"\
+      \ in globals() else \"\",\n                os.path.join(os.path.dirname(__file__),\
+      \ \"..\", \"generator_lpi.pt\") if \"__file__\" in globals() else \"\",\n  \
+      \          ]\n            for cand in candidates:\n                if cand and\
+      \ os.path.exists(cand):\n                    resolved_path = os.path.abspath(cand)\n\
+      \                    break\n\n            if resolved_path and os.path.exists(resolved_path):\n\
+      \                self.model = torch.jit.load(resolved_path, map_location=self.device)\n\
+      \                self.model.eval()\n                self.gpu_noise = torch.zeros(1,\
+      \ 64, dtype=torch.float32, device=self.device)\n                self.b_tensor\
+      \ = torch.zeros(1, 256, dtype=torch.float32, device=self.device)\n         \
+      \       print(f\"[CGAN Gen] Successfully loaded TorchScript model from {resolved_path}\"\
+      )\n            else:\n                print(f\"[CGAN Gen] Note: Model '{raw_path}'\
+      \ will be loaded when flowgraph starts.\")\n        except Exception as e:\n\
+      \            print(f\"[CGAN Gen] Note during inspection: {e}\")\n\n    def work(self,\
+      \ input_items, output_items):\n        in0 = input_items[0]\n        out = output_items[0]\n\
+      \        num_frames = len(in0)\n        if num_frames == 0:\n            return\
+      \ 0\n\n        if self.model is None:\n            self._load_model()\n\n  \
+      \      if self.model is None or self.torch is None:\n            # Fallback\
+      \ zero/pass-through if model weights unavailable\n            for i in range(num_frames):\n\
+      \                out[i][:256] = in0[i]\n                out[i][256:] = 0.0\n\
+      \            return num_frames\n\n        for i in range(num_frames):\n    \
+      \        frame = in0[i]\n            self.b_tensor[0, :] = self.torch.from_numpy(frame.real.astype(np.float32))\n\
+      \            self.gpu_noise.normal_(mean=0.0, std=1.0)\n            with self.torch.no_grad():\n\
+      \                covert = self.model(self.gpu_noise, self.b_tensor)\n      \
+      \      c_np = covert.cpu().numpy()[0]\n            out[i] = (c_np[0, :] + 1j\
+      \ * c_np[1, :]).astype(np.complex64) * self.gain_factor\n\n        return num_frames\n"
     affinity: ''
     alias: ''
     comment: CGAN Covert Generator
     gain_factor: '0.35'
     maxoutbuf: '0'
     minoutbuf: '0'
-    model_path: C:/Users/yasht/Desktop/LPI_CGAN/generator_lpi.pt
+    model_path: '''generator_lpi.pt'''
   states:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [952, 304]
+    coordinate:
+    - 952
+    - 304
     rotation: 0
     state: enabled
 - name: blocks_vector_to_stream_0
@@ -208,7 +276,9 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1168, 304]
+    coordinate:
+    - 1168
+    - 304
     rotation: 0
     state: enabled
 - name: uhd_usrp_sink_0
@@ -247,7 +317,9 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1384, 304]
+    coordinate:
+    - 1384
+    - 304
     rotation: 0
     state: enabled
 - name: qtgui_time_sink_x_0
@@ -344,20 +416,44 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1384, 560]
+    coordinate:
+    - 1384
+    - 560
     rotation: 0
     state: enabled
-
 connections:
-- [blocks_file_source_0, '0', blocks_unpack_k_bits_bb_0, '0']
-- [blocks_unpack_k_bits_bb_0, '0', digital_chunks_to_symbols_xx_0, '0']
-- [blocks_unpack_k_bits_bb_0, '0', blocks_file_sink_bits, '0']
-- [digital_chunks_to_symbols_xx_0, '0', blocks_stream_to_vector_0, '0']
-- [blocks_stream_to_vector_0, '0', epy_block_0, '0']
-- [epy_block_0, '0', blocks_vector_to_stream_0, '0']
-- [blocks_vector_to_stream_0, '0', uhd_usrp_sink_0, '0']
-- [blocks_vector_to_stream_0, '0', qtgui_time_sink_x_0, '0']
-
+- - blocks_file_source_0
+  - '0'
+  - blocks_unpack_k_bits_bb_0
+  - '0'
+- - blocks_unpack_k_bits_bb_0
+  - '0'
+  - digital_chunks_to_symbols_xx_0
+  - '0'
+- - blocks_unpack_k_bits_bb_0
+  - '0'
+  - blocks_file_sink_bits
+  - '0'
+- - digital_chunks_to_symbols_xx_0
+  - '0'
+  - blocks_stream_to_vector_0
+  - '0'
+- - blocks_stream_to_vector_0
+  - '0'
+  - epy_block_0
+  - '0'
+- - epy_block_0
+  - '0'
+  - blocks_vector_to_stream_0
+  - '0'
+- - blocks_vector_to_stream_0
+  - '0'
+  - uhd_usrp_sink_0
+  - '0'
+- - blocks_vector_to_stream_0
+  - '0'
+  - qtgui_time_sink_x_0
+  - '0'
 metadata:
   file_format: 1
   grc_version: 3.10.12.0
