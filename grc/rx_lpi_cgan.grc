@@ -28,33 +28,38 @@ options:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [8, 8]
+    coordinate:
+    - 8
+    - 8
     rotation: 0
     state: enabled
-
 blocks:
 - name: samp_rate
   id: variable
   parameters:
-    comment: '1 MS/s covert streaming'
+    comment: 1 MS/s covert streaming
     value: '1000000'
   states:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [200, 12]
+    coordinate:
+    - 200
+    - 12
     rotation: 0
     state: enabled
 - name: center_freq
   id: variable
   parameters:
-    comment: '750 MHz RF Carrier'
+    comment: 750 MHz RF Carrier
     value: '750000000'
   states:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [400, 12]
+    coordinate:
+    - 400
+    - 12
     rotation: 0
     state: enabled
 - name: rx_gain
@@ -66,7 +71,9 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [600, 12]
+    coordinate:
+    - 600
+    - 12
     rotation: 0
     state: enabled
 - name: frame_size
@@ -78,7 +85,9 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [800, 12]
+    coordinate:
+    - 800
+    - 12
     rotation: 0
     state: enabled
 - name: uhd_usrp_source_0
@@ -121,7 +130,9 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [88, 304]
+    coordinate:
+    - 88
+    - 304
     rotation: 0
     state: enabled
 - name: blocks_file_sink_raw
@@ -130,7 +141,8 @@ blocks:
     affinity: ''
     alias: ''
     append: 'False'
-    comment: RAW baseband capture - feed ota_verify.py for offline alignment + BER + KS field test
+    comment: RAW baseband capture - feed ota_verify.py for offline alignment + BER
+      + KS field test
     file: C:\\Users\\gspra\\OneDrive\\Desktop\\LPI_CGAN\\rx_raw.fc32
     type: complex
     unbuffered: 'False'
@@ -139,7 +151,9 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [88, 480]
+    coordinate:
+    - 88
+    - 480
     rotation: 0
     state: enabled
 - name: blocks_stream_to_vector_0
@@ -157,13 +171,63 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [400, 304]
+    coordinate:
+    - 400
+    - 304
     rotation: 0
     state: enabled
 - name: epy_block_0
   id: epy_block
   parameters:
-    _source_code: "import os, numpy as np\nfrom gnuradio import gr\n\nclass cgan_decoder_block(gr.sync_block):\n    def __init__(self, model_path='decoder_lpi.pt'):\n        gr.sync_block.__init__(self, name='CGAN_LPI_Decoder', in_sig=[(np.complex64, 512)], out_sig=[(np.complex64, 256)])\n        import torch\n        self.torch = torch\n        self.device = 'cpu'\n        if not os.path.exists(model_path):\n            for cand in ['decoder_lpi.pt', 'C:/Users/gspra/OneDrive/Desktop/LPI_CGAN/decoder_lpi.pt', '../decoder_lpi.pt']:\n                if os.path.exists(cand):\n                    model_path = cand\n                    break\n        self.model = torch.jit.load(model_path, map_location=self.device)\n        self.model.eval()\n        self.gpu_input = torch.zeros(1, 2, 512, dtype=torch.float32, device=self.device)\n        print(f'[CGAN Dec] Loaded from {model_path} on {self.device}')\n\n    def work(self, input_items, output_items):\n        in0 = input_items[0]\n        out = output_items[0]\n        for i in range(len(in0)):\n            frame = in0[i]\n            v = np.concatenate([frame.real, frame.imag]).astype(np.float32)\n            v[:512] -= v[:512].mean()\n            v[512:] -= v[512:].mean()\n            v = v / np.sqrt((v * v).mean() + 1e-8)\n            self.gpu_input[0, 0, :] = self.torch.from_numpy(v[:512])\n            self.gpu_input[0, 1, :] = self.torch.from_numpy(v[512:])\n            with self.torch.no_grad():\n                b_hat = self.model(self.gpu_input).cpu().numpy()[0]\n            symbols = np.where(b_hat > 0.5, 1.0, -1.0).astype(np.complex64)\n            out[i] = symbols\n        return len(in0)\n"
+    _source_code: "import os\nimport sys\nimport numpy as np\n\n# Ensure PyTorch and\
+      \ project modules are accessible across all conda environments\nfor _extra_path\
+      \ in [\n    r\"C:\\Users\\gspra\\radioconda\\Lib\\site-packages\",\n    r\"\
+      C:\\Users\\gspra\\OneDrive\\Desktop\\LPI_CGAN\",\n    os.path.abspath(os.path.join(os.path.dirname(__file__),\
+      \ \"..\")) if \"__file__\" in globals() else \"\",\n]:\n    if _extra_path and\
+      \ os.path.exists(_extra_path) and _extra_path not in sys.path:\n        sys.path.insert(0,\
+      \ _extra_path)\n\nfrom gnuradio import gr\n\n\nclass cgan_decoder_block(gr.sync_block):\n\
+      \    \"\"\"CGAN Covert LPI Signal Decoder.\n    Accepts vectors of 512 complex\
+      \ baseband samples, performs standard normalization,\n    and infers 256 decoded\
+      \ BPSK symbols (-1.0 / +1.0) using the trained neural receiver.\n    \"\"\"\n\
+      \n    def __init__(self, model_path=\"decoder_lpi.pt\"):\n        gr.sync_block.__init__(\n\
+      \            self,\n            name=\"CGAN_LPI_Decoder\",\n            in_sig=[(np.complex64,\
+      \ 512)],\n            out_sig=[(np.complex64, 256)],\n        )\n        self.model_path\
+      \ = str(model_path)\n        self.torch = None\n        self.model = None\n\
+      \        self.device = \"cpu\"\n        self.gpu_input = None\n        self._load_model()\n\
+      \n    def _load_model(self):\n        try:\n            import torch\n     \
+      \       self.torch = torch\n            self.device = \"cpu\"\n            raw_path\
+      \ = self.model_path.strip(\"'\\\"\")\n            resolved_path = None\n   \
+      \         candidates = [\n                raw_path,\n                os.path.join(r\"\
+      C:\\Users\\gspra\\OneDrive\\Desktop\\LPI_CGAN\", raw_path),\n              \
+      \  os.path.join(r\"C:\\Users\\gspra\\OneDrive\\Desktop\\LPI_CGAN\", \"decoder_lpi.pt\"\
+      ),\n                os.path.join(os.path.dirname(__file__), \"decoder_lpi.pt\"\
+      ) if \"__file__\" in globals() else \"\",\n                os.path.join(os.path.dirname(__file__),\
+      \ \"..\", \"decoder_lpi.pt\") if \"__file__\" in globals() else \"\",\n    \
+      \        ]\n            for cand in candidates:\n                if cand and\
+      \ os.path.exists(cand):\n                    resolved_path = os.path.abspath(cand)\n\
+      \                    break\n\n            if resolved_path and os.path.exists(resolved_path):\n\
+      \                self.model = torch.jit.load(resolved_path, map_location=self.device)\n\
+      \                self.model.eval()\n                self.gpu_input = torch.zeros(1,\
+      \ 2, 512, dtype=torch.float32, device=self.device)\n                print(f\"\
+      [CGAN Dec] Successfully loaded TorchScript model from {resolved_path}\")\n \
+      \           else:\n                print(f\"[CGAN Dec] Note: Model '{raw_path}'\
+      \ will be loaded when flowgraph starts.\")\n        except Exception as e:\n\
+      \            print(f\"[CGAN Dec] Note during inspection: {e}\")\n\n    def work(self,\
+      \ input_items, output_items):\n        in0 = input_items[0]\n        out = output_items[0]\n\
+      \        num_frames = len(in0)\n        if num_frames == 0:\n            return\
+      \ 0\n\n        if self.model is None:\n            self._load_model()\n\n  \
+      \      if self.model is None or self.torch is None:\n            # Fallback\
+      \ zero/pass-through if model weights unavailable\n            for i in range(num_frames):\n\
+      \                out[i] = np.sign(in0[i][:256].real).astype(np.complex64)\n\
+      \            return num_frames\n\n        for i in range(num_frames):\n    \
+      \        frame = in0[i]\n            v = np.concatenate([frame.real, frame.imag]).astype(np.float32)\n\
+      \            v[:512] -= v[:512].mean()\n            v[512:] -= v[512:].mean()\n\
+      \            v = v / np.sqrt((v * v).mean() + 1e-8)\n            self.gpu_input[0,\
+      \ 0, :] = self.torch.from_numpy(v[:512])\n            self.gpu_input[0, 1, :]\
+      \ = self.torch.from_numpy(v[512:])\n            with self.torch.no_grad():\n\
+      \                b_hat = self.model(self.gpu_input).cpu().numpy()[0]\n     \
+      \       symbols = np.where(b_hat > 0.5, 1.0, -1.0).astype(np.complex64)\n  \
+      \          out[i] = symbols\n\n        return num_frames\n"
     affinity: ''
     alias: ''
     comment: CGAN Decoder (with per-frame normalization)
@@ -174,7 +238,9 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [616, 304]
+    coordinate:
+    - 616
+    - 304
     rotation: 0
     state: enabled
 - name: blocks_vector_to_stream_0
@@ -192,7 +258,9 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [832, 304]
+    coordinate:
+    - 832
+    - 304
     rotation: 0
     state: enabled
 - name: blocks_file_sink_0
@@ -201,7 +269,8 @@ blocks:
     affinity: ''
     alias: ''
     append: 'False'
-    comment: Inline-decoded symbols (pre-alignment - use rx_raw.fc32 + ota_verify.py for the real BER)
+    comment: Inline-decoded symbols (pre-alignment - use rx_raw.fc32 + ota_verify.py
+      for the real BER)
     file: C:\\Users\\gspra\\OneDrive\\Desktop\\LPI_CGAN\\recovered_symbols.fc32
     type: complex
     unbuffered: 'False'
@@ -210,7 +279,9 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1056, 304]
+    coordinate:
+    - 1056
+    - 304
     rotation: 0
     state: enabled
 - name: qtgui_time_sink_x_0
@@ -307,18 +378,36 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [616, 560]
+    coordinate:
+    - 616
+    - 560
     rotation: 0
     state: enabled
-
 connections:
-- [uhd_usrp_source_0, '0', blocks_file_sink_raw, '0']
-- [uhd_usrp_source_0, '0', blocks_stream_to_vector_0, '0']
-- [uhd_usrp_source_0, '0', qtgui_time_sink_x_0, '0']
-- [blocks_stream_to_vector_0, '0', epy_block_0, '0']
-- [epy_block_0, '0', blocks_vector_to_stream_0, '0']
-- [blocks_vector_to_stream_0, '0', blocks_file_sink_0, '0']
-
+- - uhd_usrp_source_0
+  - '0'
+  - blocks_file_sink_raw
+  - '0'
+- - uhd_usrp_source_0
+  - '0'
+  - blocks_stream_to_vector_0
+  - '0'
+- - uhd_usrp_source_0
+  - '0'
+  - qtgui_time_sink_x_0
+  - '0'
+- - blocks_stream_to_vector_0
+  - '0'
+  - epy_block_0
+  - '0'
+- - epy_block_0
+  - '0'
+  - blocks_vector_to_stream_0
+  - '0'
+- - blocks_vector_to_stream_0
+  - '0'
+  - blocks_file_sink_0
+  - '0'
 metadata:
   file_format: 1
   grc_version: 3.10.12.0
