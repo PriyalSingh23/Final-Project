@@ -22,3 +22,13 @@ wandb/
 *.bak.*
 
 *.pdf.txt
+
+# --- local virtualenv (build/test only, never committed) ---------------------
+.venv/
+
+# --- arena-run measurement artefacts ----------------------------------------
+# eval_arena.json is kept: app.py's /api/metrics reads it by default.
+!lpi_v4/run/eval_arena.json
+
+# local backups of the superseded v1 console
+*.legacy-v1.bak

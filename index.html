@@ -218,7 +218,7 @@ body {
     <div class="logo">ShadowComm LPI</div>
     <div class="status-bar">
         <span class="status-dot"></span>
-        <span id="linkStatus">LPI Active | TX: 750kHz</span>
+        <span id="linkStatus">Loading model…</span>
     </div>
     <button class="nav-btn active" onclick="showPanel('chat')">💬 Secure Chat</button>
     <button class="nav-btn" onclick="showPanel('sdr')">📡 SDR Control</button>
@@ -230,7 +230,7 @@ body {
 <div class="main">
     <div class="header">
         <h2 id="panelTitle">Secure Chat</h2>
-        <div class="freq-display" id="freqDisplay">750.000 kHz | BW: 32 kHz | Gain: 10 dB</div>
+        <div class="freq-display" id="freqDisplay">—</div>
     </div>
 
     <!-- CHAT PANEL -->
@@ -312,39 +312,49 @@ body {
 
     <!-- METRICS PANEL -->
     <div id="panel-metrics" class="panel">
+        <div id="metricSource" style="margin-bottom:12px;font-size:12px;color:#6b7280;font-family:monospace;"></div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;">
             <div class="metric-card">
-                <div class="value" id="mKS">0.91</div>
-                <div class="label">KS Test p-value</div>
+                <div class="value" id="mKS">—</div>
+                <div class="label">KS p-value (&gt; 0.05, want &gt; 0.85)</div>
             </div>
             <div class="metric-card">
-                <div class="value" id="mAdv">52.3%</div>
-                <div class="label">Adversary Detect</div>
+                <div class="value" id="mAdv">—</div>
+                <div class="label">Adversary CNN (48–56 %)</div>
             </div>
             <div class="metric-card">
-                <div class="value" id="mBER">0.30%</div>
-                <div class="label">Bit Error Rate</div>
+                <div class="value" id="mBER">—</div>
+                <div class="label">Field BER, worst ≥ 5 dB (&lt; 1 %)</div>
             </div>
             <div class="metric-card">
-                <div class="value" id="mEVM">8.1%</div>
-                <div class="label">EVM RMS</div>
+                <div class="value" id="mFER">—</div>
+                <div class="label">Message FER (&lt; 5 %)</div>
             </div>
             <div class="metric-card">
-                <div class="value" id="mLink">87%</div>
-                <div class="label">Link Quality</div>
+                <div class="value" id="mEW">—</div>
+                <div class="label">EW domains passed</div>
             </div>
             <div class="metric-card">
-                <div class="value" id="mCyclo">0.002</div>
-                <div class="label">Cyclo Feature</div>
+                <div class="value" id="mSc">—</div>
+                <div class="label">Composite S<sub>c</sub> (&lt; 0.20)</div>
+            </div>
+            <div class="metric-card">
+                <div class="value" id="mCyclo">—</div>
+                <div class="label">Cyclostationary SCF ratio</div>
+            </div>
+            <div class="metric-card">
+                <div class="value" id="mCirc">—</div>
+                <div class="label">IQ circularity (&lt; 0.15)</div>
+            </div>
+            <div class="metric-card">
+                <div class="value" id="mPilot">—</div>
+                <div class="label">Last decode: pilot SNR</div>
             </div>
         </div>
         <div style="margin-top:24px;padding:16px;background:#111827;border-radius:8px;border:1px solid #1f2937;">
             <h3 style="color:#10b981;margin-bottom:12px;">🛡️ Threat Assessment</h3>
-            <p style="color:#9ca3af;font-size:14px;line-height:1.6;">
-                Current waveform is <strong style="color:#10b981;">STEALTH</strong>. 
-                KS p-value 0.91 confirms Gaussian distribution. 
-                Adversary CNN accuracy at 52.3% (near-random guessing). 
-                Cyclostationary features suppressed below noise floor.
+            <p id="threatText" style="color:#9ca3af;font-size:14px;line-height:1.6;">
+                Waiting for the first measurement…
             </p>
         </div>
     </div>
@@ -396,18 +406,68 @@ function showPanel(id) {
     document.getElementById('panelTitle').textContent = titles[id];
 }
 
+// ---- live config -----------------------------------------------------------
+fetch('/api/config').then(r => r.json()).then(c => {
+    document.getElementById('linkStatus').textContent =
+        `LPI Active | ${(c.center_freq_hz/1e6).toFixed(1)} MHz | ${c.sample_rate/1000} kS/s | epoch ${c.epoch}`;
+    document.getElementById('freqDisplay').textContent =
+        `${(c.center_freq_hz/1e9).toFixed(3)} GHz | ${c.sample_rate/1000} kS/s | ` +
+        `frame ${c.frame_len}+${c.pilot_len} | ${c.processing_gain_db} dB gain | ` +
+        `${c.info_rate_kbps} kb/s | ${c.uhd_attached ? 'USRP ATTACHED' : 'loopback demo'}`;
+    document.getElementById('msgInput').placeholder =
+        `Type secure message (max ${c.max_chars_per_burst} chars per burst)…`;
+    const sdr = document.getElementById('panel-sdr');
+    if (sdr) {
+        const note = document.createElement('div');
+        note.style.cssText = 'margin-top:14px;padding:10px;background:#111827;border:1px solid #1f2937;border-radius:6px;font-size:12px;color:#9ca3af;line-height:1.6';
+        note.innerHTML = `<strong style="color:#e0e6ed">v4 operating point</strong> — ` +
+            `frame ${c.frame_len} payload + ${c.pilot_len} keyed pilot samples = ` +
+            `${c.frame_ms} ms, ${c.n_bits} bits/frame, ${c.processing_gain_db} dB processing gain. ` +
+            `Sample rate is 245760 S/s because a B210 cannot go below ~208 kS/s; ` +
+            `the stealth comes from the waveform, not from a slow clock.`;
+        sdr.appendChild(note);
+    }
+}).catch(e => console.warn('config', e));
+
+// ---- chat: send then immediately decode ------------------------------------
 function sendMsg() {
     const input = document.getElementById('msgInput');
     const text = input.value.trim();
     if (!text) return;
     const chat = document.getElementById('chatArea');
-    chat.innerHTML += `<div class="message sent">${text}<div class="meta">You • Encrypting → CGAN → Air</div></div>`;
+    chat.innerHTML += `<div class="message sent">${text}<div class="meta">You • AES-128-CTR → CRC-8 → RS(42,34) → CGAN → IQ</div></div>`;
     input.value = '';
     chat.scrollTop = chat.scrollHeight;
 
     fetch('/api/send', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:text})})
     .then(r => r.json()).then(d => {
-        console.log('TX:', d);
+        if (d.status === 'error') {
+            chat.innerHTML += `<div class="message received" style="border-color:#ef4444">TX error: ${d.detail}<div class="meta">System</div></div>`;
+            return;
+        }
+        chat.innerHTML += `<div class="message received">
+            <div style="font-family:monospace;font-size:11px;color:#10b981;word-break:break-all;">${d.ciphertext_hex}…</div>
+            <div class="meta">on the wire: ${d.bursts} repeat(s) of the RS codeword · ${d.samples} samples · ${d.duration_ms} ms · ${d.over_the_air ? 'OVER THE AIR' : 'waveform written to ' + d.iq_file}</div>
+        </div>`;
+        chat.scrollTop = chat.scrollHeight;
+        recvNow();
+    }).catch(e => {
+        chat.innerHTML += `<div class="message received">TX failed: ${e}<div class="meta">System</div></div>`;
+    });
+}
+
+function recvNow() {
+    const chat = document.getElementById('chatArea');
+    fetch('/api/receive', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})})
+    .then(r => r.json()).then(d => {
+        const ok = d.status === 'received';
+        chat.innerHTML += `<div class="message ${ok ? 'received' : 'sent'}" style="${ok ? '' : 'border-color:#f59e0b'}">
+            ${ok ? d.message : '(no lock)'}
+            <div class="meta">RX • ${d.how || ''} · frames ${d.n_frames} · CFO ${(d.cfo_hz||0).toFixed(1)} Hz ·
+            pilot-SNR ${d.pilot_snr_db != null ? d.pilot_snr_db.toFixed(1) : '—'} dB · CRC ${d.crc_ok || '—'}${d.attempts > 1 ? ' · ARQ attempt ' + d.attempts : ''}</div>
+        </div>`;
+        chat.scrollTop = chat.scrollHeight;
+        refreshMetrics();
     });
 }
 
@@ -425,20 +485,26 @@ function applySDR() {
         bandwidth_hz: parseInt(document.getElementById('bwSlider').value) * 1000,
         tx_gain_db: parseInt(document.getElementById('txGainSlider').value),
         rx_gain_db: parseInt(document.getElementById('rxGainSlider').value),
-        cgan_gain: parseInt(document.getElementById('cganGainSlider').value) / 100,
         sample_rate: parseInt(document.getElementById('sampRate').value)
     };
     fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(config)})
-    .then(r => r.json()).then(d => alert('SDR settings applied'));
+    .then(r => r.json()).then(d => {
+        const c = d.config || {};
+        document.getElementById('freqDisplay').textContent =
+            `${(c.center_freq_hz/1e9).toFixed(3)} GHz | ${c.sample_rate/1000} kS/s | ` +
+            `frame ${c.frame_len}+${c.pilot_len} | ${c.processing_gain_db} dB gain | ` +
+            `${c.info_rate_kbps} kb/s | ${c.uhd_attached ? 'USRP ATTACHED' : 'loopback demo'}`;
+        alert('SDR settings applied');
+    });
 }
 
 function saveSettings() {
     const config = {
-        aes_key: document.getElementById('aesKey').value,
-        model_path_gen: document.getElementById('modelPath').value
+        session_key: document.getElementById('aesKey').value,
+        mode: document.getElementById('rsCode') ? document.getElementById('rsCode').value : 'ctr'
     };
     fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(config)})
-    .then(r => r.json()).then(d => alert('Settings saved'));
+    .then(r => r.json()).then(d => alert('Session key updated — it also re-keys the Zadoff-Chu preamble, so TX and RX must match'));
 }
 
 function saveProfile() { alert('Profile saved to config.json'); }
@@ -452,22 +518,58 @@ const spectrumChart = new Chart(ctx, {
 });
 
 function updateSpectrum(data) {
-    spectrumChart.data.datasets[0].data = data.map(v => 20*Math.log10(Math.abs(v)+1e-10));
+    if (!data || !data.length) return;
+    const db = data.map(v => typeof v === 'number' ? v : 20*Math.log10(Math.abs(v)+1e-10));
+    spectrumChart.data.labels = db.map((_, i) => i);
+    spectrumChart.data.datasets[0].data = db;
     spectrumChart.update('none');
-    document.getElementById('specPeak').textContent = Math.max(...data).toFixed(1);
+    document.getElementById('specPeak').textContent = Math.max(...db).toFixed(1);
+    const mean = db.reduce((a,b)=>a+b,0)/db.length;
+    const flat = db.reduce((a,b)=>a+Math.abs(b-mean),0)/db.length;
+    document.getElementById('specFlat').textContent = (1/(1+flat)).toFixed(3);
 }
 
-// Poll metrics
-setInterval(() => {
+function refreshSpectrum() {
+    fetch('/api/spectrum').then(r => r.json()).then(s => {
+        if (s.status === 'ok') updateSpectrum(s.tx);
+    }).catch(()=>{});
+}
+
+// ---- metrics: real numbers from lpi_eval.py's JSON, never constants --------
+const f = (v, n=3) => (v === null || v === undefined || Number.isNaN(v)) ? '—' : Number(v).toFixed(n);
+function refreshMetrics() {
     fetch('/api/metrics').then(r => r.json()).then(m => {
-        document.getElementById('mKS').textContent = m.ks_pvalue.toFixed(2);
-        document.getElementById('mAdv').textContent = m.adversary_accuracy.toFixed(1) + '%';
-        document.getElementById('mBER').textContent = (m.ber*100).toFixed(2) + '%';
-        document.getElementById('mEVM').textContent = m.evm.toFixed(1) + '%';
-        document.getElementById('mLink').textContent = m.link_quality + '%';
-    });
-    socket.emit('spectrum_request');
-}, 1000);
+        if (m.status !== 'ok') {
+            document.getElementById('metricSource').textContent = m.detail || 'not measured';
+            return;
+        }
+        document.getElementById('metricSource').textContent =
+            `measured by ${m.source} · ${m.measured || ''} · ${m.protocol.frames || '?'} frames · ` +
+            `${m.protocol.n_msg_per_snr || '?'} msgs/SNR · detector fit ${m.protocol.fit_warden_steps || '?'} steps`;
+        document.getElementById('mKS').textContent = f(m.ks_pvalue, 3);
+        document.getElementById('mAdv').textContent = f(m.adversary_accuracy, 1) + ' %';
+        document.getElementById('mBER').textContent = m.ber_field_worst == null ? '—' : Number(m.ber_field_worst).toExponential(1);
+        document.getElementById('mFER').textContent = m.fer_worst == null ? '—' : (m.fer_worst*100).toFixed(1) + ' %';
+        document.getElementById('mEW').textContent = (m.ew_pass == null ? '—' : m.ew_pass + '/8');
+        document.getElementById('mSc').textContent = f(m.composite_sc, 3);
+        document.getElementById('mCyclo').textContent = f(m.scf_ratio, 3);
+        document.getElementById('mCirc').textContent = f(m.iq_circularity, 4);
+        document.getElementById('mPilot').textContent = f(m.last_pilot_snr_db, 1) + ' dB';
+        const gate = m.gate || {};
+        const names = Object.keys(gate);
+        const pass = names.filter(k => (gate[k] && gate[k].pass !== undefined) ? gate[k].pass : gate[k]);
+        const txt = names.length
+            ? `Field gate ${pass.length}/${names.length} PASS · KS p = ${f(m.ks_pvalue,3)} (cannot reject the Gaussian null) · ` +
+              `adversary CNN ${f(m.adversary_accuracy,1)} % (chance = 50 %) · composite S<sub>c</sub> ${f(m.composite_sc,3)} · ` +
+              `worst in-band BER ${m.ber_field_worst == null ? '—' : Number(m.ber_field_worst).toExponential(1)}, FER ${m.fer_worst == null ? '—' : (m.fer_worst*100).toFixed(1)+' %'} ` +
+              `(95 % upper bound ${m.fer_ci95 == null ? '—' : (m.fer_ci95*100).toFixed(1)+' %'}) · last decode ${m.last_decode_ok ? 'CRC OK' : (m.last_crc_ok ? 'CRC '+m.last_crc_ok : 'no lock yet')}`
+            : 'No gate data in the measurement file.';
+        document.getElementById('threatText').innerHTML = txt;
+    }).catch(()=>{});
+}
+
+setInterval(() => { refreshMetrics(); refreshSpectrum(); }, 2000);
+refreshMetrics();
 </script>
 </body>
 </html>
